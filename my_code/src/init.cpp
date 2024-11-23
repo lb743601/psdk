@@ -10,6 +10,10 @@ extern "C" {
 #include "videoplayer.h"
 #include "camera.h"
 #include <sys/stat.h> // For directory creation
+#include <chrono>
+#include <fstream>
+#include <iomanip>
+#include <sstream>
 static bool shouldExecute = true;
 
 void init()
@@ -301,6 +305,8 @@ static T_DjiMutexHandle s_tapZoomMutex = {0};
 #include "dji_payload_camera.h"
 static T_DjiCameraCommonHandler s_commonHandler;
 static T_DjiCameraMediaDownloadPlaybackHandler s_psdkCameraMedia = {0};
+static T_DjiCameraSDCardState s_cameraSDCardState = {0};
+static T_DjiCameraSystemState s_cameraState ;
 static T_DjiReturnCode GetSystemState(T_DjiCameraSystemState *systemState);
 static T_DjiReturnCode SetMode(E_DjiCameraMode mode);
 static T_DjiReturnCode StartRecordVideo(void);
@@ -329,13 +335,21 @@ T_DjiReturnCode DjiTest_CameraEmuBaseStartService(void)
     }
 
     
+    s_cameraSDCardState.isInserted = true;
+    s_cameraSDCardState.isVerified = true;
+    s_cameraSDCardState.totalSpaceInMB = SDCARD_TOTAL_SPACE_IN_MB;
+    s_cameraSDCardState.remainSpaceInMB = SDCARD_TOTAL_SPACE_IN_MB;
+    s_cameraSDCardState.availableCaptureCount = SDCARD_TOTAL_SPACE_IN_MB / SDCARD_PER_PHOTO_SPACE_IN_MB;
+    s_cameraSDCardState.availableRecordingTimeInSeconds =
+        SDCARD_TOTAL_SPACE_IN_MB / SDCARD_PER_SECONDS_RECORD_SPACE_IN_MB;
+    
+    s_cameraState.cameraMode=DJI_CAMERA_MODE_SHOOT_PHOTO;
 
     returnCode = DjiPayloadCamera_Init();//这个初始化才会在MSDK上显示窗口
     if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
         USER_LOG_ERROR("init payload camera error:0x%08llX", returnCode);
         return returnCode;
     }
-
     s_commonHandler.GetSystemState = GetSystemState;
     s_commonHandler.SetMode = SetMode;
     s_commonHandler.GetMode = DjiTest_CameraGetMode;
@@ -360,7 +374,7 @@ T_DjiReturnCode DjiTest_CameraEmuBaseStartService(void)
         USER_LOG_ERROR("camera register common handler error:0x%08llX", returnCode);
     }
 
-
+    
     // returnCode = DjiPayloadCamera_SetVideoStreamType(DJI_CAMERA_VIDEO_STREAM_TYPE_H264_DJI_FORMAT);
     // if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
     //     USER_LOG_ERROR("DJI camera set video stream error.");
@@ -370,6 +384,23 @@ T_DjiReturnCode DjiTest_CameraEmuBaseStartService(void)
 }
 static T_DjiReturnCode GetSystemState(T_DjiCameraSystemState *systemState)
 {
+    T_DjiReturnCode returnCode;
+    T_DjiOsalHandler *osalHandler = DjiPlatform_GetOsalHandler();
+
+    returnCode = osalHandler->MutexLock(s_commonMutex);
+    if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+        USER_LOG_ERROR("lock mutex error: 0x%08llX.", returnCode);
+        return returnCode;
+    }
+
+    *systemState = s_cameraState;
+
+    returnCode = osalHandler->MutexUnlock(s_commonMutex);
+    if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+        USER_LOG_ERROR("unlock mutex error: 0x%08llX.", returnCode);
+        return returnCode;
+    }
+
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
 static T_DjiReturnCode SetMode(E_DjiCameraMode mode){
@@ -377,35 +408,13 @@ static T_DjiReturnCode SetMode(E_DjiCameraMode mode){
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
 static T_DjiReturnCode StartRecordVideo(void){
-    USER_LOG_INFO("1111");
+    
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
 static T_DjiReturnCode StopRecordVideo(void){
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
 static T_DjiReturnCode StartShootPhoto(void){
-    USER_LOG_INFO("11112323");
-    return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
-}
-static T_DjiReturnCode StopShootPhoto(void){
-    return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
-}
-#include <chrono>
-#include <fstream>
-#include <iomanip>
-#include <sstream>
-
-// 示例代码
-static T_DjiReturnCode SetShootPhotoMode(E_DjiCameraShootPhotoMode mode) {
-    // Check if the function should execute
-    if (!shouldExecute) {
-        shouldExecute = true; // Reset the flag for the next call
-        USER_LOG_INFO("Skipped this execution due to consecutive trigger.");
-        return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
-    }
-
-    shouldExecute = false; // Mark that the first execution has occurred
-
     auto& camera = Camera::getInstance();
     const std::vector<uint8_t>& frame = camera.getCurrentFrame();
 
@@ -451,6 +460,18 @@ static T_DjiReturnCode SetShootPhotoMode(E_DjiCameraShootPhotoMode mode) {
     USER_LOG_INFO("Frame saved to file: %s", filename.str().c_str());
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
+static T_DjiReturnCode StopShootPhoto(void){
+    return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
+}
+
+
+// 示例代码
+static T_DjiReturnCode SetShootPhotoMode(E_DjiCameraShootPhotoMode mode) {
+   
+
+    
+    return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
+}
 
 static T_DjiReturnCode GetShootPhotoMode(E_DjiCameraShootPhotoMode *mode){
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
@@ -467,7 +488,25 @@ static T_DjiReturnCode SetPhotoTimeIntervalSettings(T_DjiCameraPhotoTimeInterval
 static T_DjiReturnCode GetPhotoTimeIntervalSettings(T_DjiCameraPhotoTimeIntervalSettings *settings){
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
-static T_DjiReturnCode GetSDCardState(T_DjiCameraSDCardState *sdCardState){
+static T_DjiReturnCode GetSDCardState(T_DjiCameraSDCardState *sdCardState)
+{
+    T_DjiReturnCode returnCode;
+    T_DjiOsalHandler *osalHandler = DjiPlatform_GetOsalHandler();
+
+    returnCode = osalHandler->MutexLock(s_commonMutex);
+    if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+        USER_LOG_ERROR("lock mutex error: 0x%08llX.", returnCode);
+        return returnCode;
+    }
+
+    memcpy(sdCardState, &s_cameraSDCardState, sizeof(T_DjiCameraSDCardState));
+
+    returnCode = osalHandler->MutexUnlock(s_commonMutex);
+    if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+        USER_LOG_ERROR("unlock mutex error: 0x%08llX.", returnCode);
+        return returnCode;
+    }
+
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
 static T_DjiReturnCode FormatSDCard(void){

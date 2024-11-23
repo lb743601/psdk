@@ -26,7 +26,9 @@
 #define USER_APP_LICENSE            "PrxHQ3wAXren6BIDXO5SBM3neka3wp8xo+8yD1IpZU/69w2O3EQiijAjEP1OhGN44v/wV9UAl5dgSwlh4z/SLiqu1Iyw55yFWQ+DAeZ6w7kF+ywfe6WUrHZOFN7/sVLbPFxK+xf57SB3PmE29YT2vH48/Q7SfTAWudD1IgwrpaRpk6D5kbhxTkSwLCPLHUFXz7Ff88464ilRoGVjtQWTP+1t4O3rDitLB1hp4vjvhfpJ3fzr+F55BKx0EvX5MFYYxXQkTVC4PVD0j90VICi1wqr11LKI0kkYmissfQZuMx2X2skQ4jK+slxu+EOlRy5UJ43GngPPYCZSbp2ZZmohQQ=="
 #define USER_DEVELOPER_ACCOUNT      "17718630648@163.com"
 #define USER_BAUD_RATE              "460800"
-
+#define SDCARD_TOTAL_SPACE_IN_MB                (32 * 1024)
+#define SDCARD_PER_PHOTO_SPACE_IN_MB            (4)
+#define SDCARD_PER_SECONDS_RECORD_SPACE_IN_MB   (2)
 #define USER_UTIL_UNUSED(x)                                 ((x) = (x))
 #define USER_UTIL_MIN(a, b)                                 (((a) < (b)) ? (a) : (b))
 #define USER_UTIL_MAX(a, b)                                 (((a) > (b)) ? (a) : (b))
