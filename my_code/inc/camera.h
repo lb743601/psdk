@@ -6,7 +6,7 @@
 #include "dji_platform.h"
 #include "dji_typedef.h"
 #include <linux/videodev2.h>
-
+#include <vector>
 class Camera {
 public:
     static constexpr uint32_t WIDTH = 640;
@@ -18,7 +18,7 @@ public:
     static constexpr int NAL_HEADER_SIZE = 6;
 
     using FrameCallback = std::function<void(const uint8_t*, size_t)>;
-
+    const std::vector<uint8_t>& getCurrentFrame() const;
     static Camera& getInstance() {
         static Camera instance;
         return instance;
@@ -38,7 +38,7 @@ private:
         void* start;
         size_t length;
     };
-
+    std::vector<uint8_t> m_currentFrame;
     Camera() = default;
     Camera(const Camera&) = delete;
     Camera& operator=(const Camera&) = delete;
@@ -55,6 +55,7 @@ private:
     
     T_DjiTaskHandle m_captureThread{nullptr};
     T_DjiMutexHandle m_mutex{nullptr};
+    T_DjiMutexHandle data_mutex{nullptr};
     T_DjiSemaHandle m_semaphore{nullptr};
     
     bool m_isRunning{false};

@@ -9,6 +9,9 @@ extern "C" {
 #include "camera_stream.h"
 #include "videoplayer.h"
 #include "camera.h"
+#include <sys/stat.h> // For directory creation
+static bool shouldExecute = true;
+
 void init()
 {
     T_DjiReturnCode returnCode;
@@ -297,6 +300,7 @@ static T_DjiMutexHandle s_tapZoomMutex = {0};
 
 #include "dji_payload_camera.h"
 static T_DjiCameraCommonHandler s_commonHandler;
+static T_DjiCameraMediaDownloadPlaybackHandler s_psdkCameraMedia = {0};
 static T_DjiReturnCode GetSystemState(T_DjiCameraSystemState *systemState);
 static T_DjiReturnCode SetMode(E_DjiCameraMode mode);
 static T_DjiReturnCode StartRecordVideo(void);
@@ -348,6 +352,9 @@ T_DjiReturnCode DjiTest_CameraEmuBaseStartService(void)
     s_commonHandler.GetSDCardState = GetSDCardState;
     s_commonHandler.FormatSDCard = FormatSDCard;
 
+
+
+
     returnCode = DjiPayloadCamera_RegCommonHandler(&s_commonHandler);
     if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
         USER_LOG_ERROR("camera register common handler error:0x%08llX", returnCode);
@@ -366,6 +373,7 @@ static T_DjiReturnCode GetSystemState(T_DjiCameraSystemState *systemState)
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
 static T_DjiReturnCode SetMode(E_DjiCameraMode mode){
+    
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
 static T_DjiReturnCode StartRecordVideo(void){
@@ -376,15 +384,74 @@ static T_DjiReturnCode StopRecordVideo(void){
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
 static T_DjiReturnCode StartShootPhoto(void){
+    USER_LOG_INFO("11112323");
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
 static T_DjiReturnCode StopShootPhoto(void){
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
-static T_DjiReturnCode SetShootPhotoMode(E_DjiCameraShootPhotoMode mode){
-    USER_LOG_INFO("1111");
+#include <chrono>
+#include <fstream>
+#include <iomanip>
+#include <sstream>
+
+// 示例代码
+static T_DjiReturnCode SetShootPhotoMode(E_DjiCameraShootPhotoMode mode) {
+    // Check if the function should execute
+    if (!shouldExecute) {
+        shouldExecute = true; // Reset the flag for the next call
+        USER_LOG_INFO("Skipped this execution due to consecutive trigger.");
+        return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
+    }
+
+    shouldExecute = false; // Mark that the first execution has occurred
+
+    auto& camera = Camera::getInstance();
+    const std::vector<uint8_t>& frame = camera.getCurrentFrame();
+
+    // Check if frame is empty
+    if (frame.empty()) {
+        USER_LOG_ERROR("Frame is empty, cannot save to file.");
+        return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
+    }
+
+    // Define the output folder path
+    const std::string folderPath = "data";
+    
+    // Create the folder if it doesn't exist
+    struct stat info;
+    if (stat(folderPath.c_str(), &info) != 0 || !(info.st_mode & S_IFDIR)) {
+        if (mkdir(folderPath.c_str(), 0755) != 0) {
+            USER_LOG_ERROR("Failed to create directory: %s", folderPath.c_str());
+            return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
+        }
+    }
+
+    // Get the current time and format it into the file name
+    auto now = std::chrono::system_clock::now();
+    auto now_time_t = std::chrono::system_clock::to_time_t(now);
+    auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
+
+    std::ostringstream filename;
+    filename << folderPath << "/frame_"
+             << std::put_time(std::localtime(&now_time_t), "%Y%m%d_%H%M%S")
+             << "_" << std::setfill('0') << std::setw(3) << now_ms.count()
+             << ".raw";
+
+    // Save frame to the file
+    std::ofstream outFile(filename.str(), std::ios::binary | std::ios::out);
+    if (!outFile.is_open()) {
+        USER_LOG_ERROR("Failed to open file for writing: %s", filename.str().c_str());
+        return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
+    }
+
+    outFile.write(reinterpret_cast<const char*>(frame.data()), frame.size());
+    outFile.close();
+
+    USER_LOG_INFO("Frame saved to file: %s", filename.str().c_str());
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
+
 static T_DjiReturnCode GetShootPhotoMode(E_DjiCameraShootPhotoMode *mode){
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }

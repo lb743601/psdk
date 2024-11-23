@@ -7,7 +7,7 @@
 #include <sys/mman.h>
 #include <x264.h>
 #include "dji_logger.h"
-
+#include <iostream>
 T_DjiReturnCode Camera::init(const std::string& devicePath, FrameCallback callback) {
     T_DjiReturnCode returnCode;
     T_DjiOsalHandler* osalHandler = DjiPlatform_GetOsalHandler();
@@ -26,6 +26,11 @@ T_DjiReturnCode Camera::init(const std::string& devicePath, FrameCallback callba
     }
 
     if (osalHandler->MutexCreate(&m_mutex) != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+        USER_LOG_ERROR("Create mutex error");
+        osalHandler->SemaphoreDestroy(m_semaphore);
+        return DJI_ERROR_SYSTEM_MODULE_CODE_UNKNOWN;
+    }
+    if (osalHandler->MutexCreate(&data_mutex) != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
         USER_LOG_ERROR("Create mutex error");
         osalHandler->SemaphoreDestroy(m_semaphore);
         return DJI_ERROR_SYSTEM_MODULE_CODE_UNKNOWN;
@@ -205,7 +210,7 @@ void Camera::captureThread() {
     int i_nals;
     struct v4l2_buffer buf;
     const uint8_t nalHeader[NAL_HEADER_SIZE] = {0x00, 0x00, 0x00, 0x01, 0x09, 0x10};
-    uint32_t waitDuration = 1000 / 10; // 30fps
+    uint32_t waitDuration = 1000 / 60; // 30fps
     uint32_t rightNow = 0;
     uint32_t nextFrameTime = 0;
 
@@ -232,12 +237,12 @@ void Camera::captureThread() {
     nextFrameTime += waitDuration;
 
     while (!m_stopFlag) {
-        osalHandler->TaskSleepMs(1000/10);
+        osalHandler->TaskSleepMs(1000/60);
         osalHandler->GetTimeMs(&rightNow);
         if (nextFrameTime > rightNow) {
             waitDuration = nextFrameTime - rightNow;
         } else {
-            waitDuration = 1000 / 10; // 重置为默认帧间隔
+            waitDuration = 1000 / 60; // 重置为默认帧间隔
         }
 
         // 等待新的帧
@@ -252,12 +257,18 @@ void Camera::captureThread() {
             USER_LOG_ERROR("VIDIOC_DQBUF failed");
             break;
         }
-
+        
         
         // 将YUYV转换为I420/YUV420P
         uint8_t* raw_data = (uint8_t*)m_buffers[buf.index].start;
         x264_picture_t* pic = (x264_picture_t*)m_picture;
 
+
+        
+        osalHandler->MutexLock(data_mutex);
+        m_currentFrame.resize(buf.length);        // 根据帧大小调整存储大小
+        memcpy(m_currentFrame.data(), raw_data, buf.length); // 保存到 m_currentFrame
+        osalHandler->MutexUnlock(data_mutex);
         // 找最大最小值
         uint16_t min_value = 0xFFFF;
         uint16_t max_value = 0;
@@ -273,11 +284,11 @@ void Camera::captureThread() {
         }
 
         // 添加调试信息
-        static int frame_count = 0;
-        if (frame_count++ % 30 == 0) {
-            USER_LOG_INFO("Value range - Min: 0x%04X (%u), Max: 0x%04X (%u)", 
-                          min_value, min_value, max_value, max_value);
-        }
+        // static int frame_count = 0;
+        // if (frame_count++ % 30 == 0) {
+        //     USER_LOG_INFO("Value range - Min: 0x%04X (%u), Max: 0x%04X (%u)", 
+        //                   min_value, min_value, max_value, max_value);
+        // }
 
         // 计算映射系数
         float scale = (max_value == min_value) ? 0.0f : (255.0f / (max_value - min_value));
@@ -379,6 +390,10 @@ void Camera::cleanup() {
         osalHandler->MutexDestroy(m_mutex);
         m_mutex = nullptr;
     }
+    if (data_mutex) {
+        osalHandler->MutexDestroy(data_mutex);
+        data_mutex = nullptr;
+    }
 
     // 清理V4L2资源
     if (m_buffers) {
@@ -411,4 +426,10 @@ void Camera::cleanup() {
     m_isRunning = false;
     m_stopFlag = false;
     m_bufferCount = 0;
+}
+const std::vector<uint8_t>& Camera::getCurrentFrame() const {
+    
+      
+    return m_currentFrame;
+    
 }
