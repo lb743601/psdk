@@ -599,7 +599,7 @@ static T_DjiReturnCode StartShootPhoto(void) {
     T_DjiCameraMediaFileInfo mediaFileInfo ;
     if (DjiTest_CameraMediaGetFileInfo(jpgFilePath.str().c_str(), &mediaFileInfo) == DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
         // 推送文件信息 
-        std::string fullFilePath = "/home/jetson/Downloads/mypsdk/my_psdk/build/" + jpgFilePath.str();
+        std::string fullFilePath = "/home/jetson/Downloads/run_psdk/" + jpgFilePath.str();
         std::cout<<fullFilePath<<std::endl;
 
         T_DjiReturnCode returnCode = DjiPayloadCamera_PushAddedMediaFileInfo(
@@ -969,7 +969,7 @@ static void *UserCameraMedia_SendVideoTask(void *arg)
 
             //store the photo after shooting finished
             if (s_cameraShootPhotoMode == DJI_CAMERA_SHOOT_PHOTO_MODE_SINGLE) {
-                USER_LOG_INFO("fadjkasfjksdafjksad");
+                
                 s_cameraSDCardState.remainSpaceInMB =
                     s_cameraSDCardState.remainSpaceInMB - SDCARD_PER_PHOTO_SPACE_IN_MB;
                 s_cameraState.isStoring = false;
@@ -1056,7 +1056,7 @@ static T_DjiReturnCode GetMediaFileDir(char *dirPath)
         return returnCode;
     }
     
-    snprintf(dirPath, DJI_FILE_PATH_SIZE_MAX, "%sjpg", "/home/jetson/Downloads/mypsdk/my_psdk/build/");
+    snprintf(dirPath, DJI_FILE_PATH_SIZE_MAX, "%sjpg", "/home/jetson/Downloads/run_psdk/");
 
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
