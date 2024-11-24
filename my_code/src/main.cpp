@@ -324,7 +324,9 @@ int main()
     DjiTest_CameraEmuBaseStartService();
     media_init();
     int a;
-    std::cin>>a;
-    std::cout<<"finish"<<std::endl;
+    while (1)
+    {
+
+    }
     return 0;
 }

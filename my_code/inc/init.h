@@ -12,6 +12,8 @@
 #include "osal_fs.h"
 #include "dji_aircraft_info.h"
 #include <csignal>
+#include "camera_emu/dji_media_file_manage/dji_media_file_core.h"
+#define FFMPEG_CMD_BUF_SIZE                 (256 + 256)
 #define DJI_LOG_PATH  "Logs/DJI"
 #define DJI_LOG_PATH                    "Logs/DJI"
 #define DJI_LOG_INDEX_FILE_NAME         "Logs/latest"
@@ -35,6 +37,7 @@
 T_DjiReturnCode DjiUser_LocalWrite(const uint8_t *data, uint16_t dataLen);
 T_DjiReturnCode DjiUser_PrintConsole(const uint8_t *data, uint16_t dataLen);
 T_DjiReturnCode DjiUser_LocalWriteFsInit(const char *path);
+T_DjiReturnCode DjiTest_CameraMediaGetFileInfo(const char *filePath, T_DjiCameraMediaFileInfo *fileInfo);
 void init();
 void start_service();
 static void DjiUser_NormalExitHandler(int signalNum);
