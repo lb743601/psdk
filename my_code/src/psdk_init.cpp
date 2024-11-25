@@ -435,7 +435,9 @@ T_DjiReturnCode StopRecordVideo(void){
 T_DjiReturnCode StartShootPhoto(void) {
     T_DjiReturnCode returnCode;
     T_DjiOsalHandler *osalHandler = DjiPlatform_GetOsalHandler();
-    s_cameraSDCardState.isVerified=false;
+    if(s_cameraShootPhotoMode == DJI_CAMERA_SHOOT_PHOTO_MODE_SINGLE)
+    {
+        s_cameraSDCardState.isVerified=false;
     auto& camera = Camera::getInstance();
     const std::vector<uint8_t>& frame = camera.getCurrentFrame();
     returnCode = osalHandler->MutexLock(s_commonMutex);
@@ -619,6 +621,11 @@ T_DjiReturnCode StartShootPhoto(void) {
         }
     }
     s_cameraSDCardState.isVerified=true;
+    }
+    else
+    {
+        USER_LOG_INFO("not single mode");
+    }
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
 T_DjiReturnCode StopShootPhoto(void){
