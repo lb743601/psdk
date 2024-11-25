@@ -144,7 +144,7 @@ T_DjiReturnCode StartApp(void)
         throw std::runtime_error("Get aircraft base info error.");
     }
 
-    returnCode = DjiCore_SetAlias("PSDK_APPALIAS");
+    returnCode = DjiCore_SetAlias("厉奔的PSDK");
     if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
         throw std::runtime_error("Set alias error.");
     }
