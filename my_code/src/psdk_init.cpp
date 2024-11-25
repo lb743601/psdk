@@ -1,22 +1,8 @@
-#include "init.h"
-#include "dji_high_speed_data_channel.h"
-extern "C" {
-#include "utils/util_misc.h"
-#include "utils/util_time.h"
-#include "utils/util_file.h"
-#include "utils/util_buffer.h"
-}
-#include "camera_stream.h"
-#include "videoplayer.h"
-#include "camera.h"
-#include <sys/stat.h> // For directory creation
-#include <chrono>
-#include <fstream>
-#include <iomanip>
-#include <sstream>
-static bool shouldExecute = true;
-static E_DjiCameraBurstCount s_cameraBurstCount = DJI_CAMERA_BURST_COUNT_2;
-void init()
+#include "psdk_init.h"
+
+
+//--------will be used---
+T_DjiReturnCode SetEnvironment(void)
 {
     T_DjiReturnCode returnCode;
     T_DjiOsalHandler osalHandler = {0};
@@ -125,8 +111,10 @@ void init()
     if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
         throw std::runtime_error("Add printf console error.");
     }
+    return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
-void start_service()
+
+T_DjiReturnCode StartApp(void)
 {
     T_DjiUserInfo userInfo;
     T_DjiReturnCode returnCode;
@@ -156,8 +144,6 @@ void start_service()
         throw std::runtime_error("Get aircraft base info error.");
     }
 
-
-
     returnCode = DjiCore_SetAlias("PSDK_APPALIAS");
     if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
         throw std::runtime_error("Set alias error.");
@@ -179,162 +165,18 @@ void start_service()
     }
 
     USER_LOG_INFO("Application start.");
-    
-}
-
-T_DjiReturnCode DjiUser_LocalWrite(const uint8_t *data, uint16_t dataLen)
-{
-    int32_t realLen;
-
-    if (s_djiLogFile == nullptr) {
-        return DJI_ERROR_SYSTEM_MODULE_CODE_UNKNOWN;
-    }
-
-    realLen = fwrite(data, 1, dataLen, s_djiLogFile);
-    fflush(s_djiLogFile);
-    if (realLen == dataLen) {
-        return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
-    } else {
-        return DJI_ERROR_SYSTEM_MODULE_CODE_UNKNOWN;
-    }
-}
-
-
-T_DjiReturnCode DjiUser_PrintConsole(const uint8_t *data, uint16_t dataLen)
-{
-    printf("%s", data);
-
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
 
-T_DjiReturnCode DjiUser_LocalWriteFsInit(const char *path)
-{
-    T_DjiReturnCode djiReturnCode = DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
-    char filePath[DJI_LOG_PATH_MAX_SIZE];
-    char systemCmd[DJI_SYSTEM_CMD_STR_MAX_SIZE];
-    char folderName[DJI_LOG_FOLDER_NAME_MAX_SIZE];
-    time_t currentTime = time(nullptr);
-    struct tm *localTime = localtime(&currentTime);
-    uint16_t logFileIndex = 0;
-    uint16_t currentLogFileIndex;
-    uint8_t ret;
-
-    if (localTime == nullptr) {
-        printf("Get local time error.\r\n");
-        return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
-    }
-
-    if (access(DJI_LOG_FOLDER_NAME, F_OK) != 0) {
-        sprintf(folderName, "mkdir %s", DJI_LOG_FOLDER_NAME);
-        ret = system(folderName);
-        if (ret != 0) {
-            printf("Create new log folder error, ret:%d.\r\n", ret);
-            return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
-        }
-    }
-
-    s_djiLogFileCnt = fopen(DJI_LOG_INDEX_FILE_NAME, "rb+");
-    if (s_djiLogFileCnt == nullptr) {
-        s_djiLogFileCnt = fopen(DJI_LOG_INDEX_FILE_NAME, "wb+");
-        if (s_djiLogFileCnt == nullptr) {
-            return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
-        }
-    } else {
-        ret = fseek(s_djiLogFileCnt, 0, SEEK_SET);
-        if (ret != 0) {
-            printf("Seek log count file error, ret: %d, errno: %d.\r\n", ret, errno);
-            return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
-        }
-
-        ret = fread((uint16_t * ) & logFileIndex, 1, sizeof(uint16_t), s_djiLogFileCnt);
-        if (ret != sizeof(uint16_t)) {
-            printf("Read log file index error.\r\n");
-        }
-    }
-
-    currentLogFileIndex = logFileIndex;
-    logFileIndex++;
-
-    ret = fseek(s_djiLogFileCnt, 0, SEEK_SET);
-    if (ret != 0) {
-        printf("Seek log file error, ret: %d, errno: %d.\r\n", ret, errno);
-        return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
-    }
-
-    ret = fwrite((uint16_t * ) & logFileIndex, 1, sizeof(uint16_t), s_djiLogFileCnt);
-    if (ret != sizeof(uint16_t)) {
-        printf("Write log file index error.\r\n");
-        fclose(s_djiLogFileCnt);
-        return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
-    }
-
-    fclose(s_djiLogFileCnt);
-
-    sprintf(filePath, "%s_%04d_%04d%02d%02d_%02d-%02d-%02d.log", path, currentLogFileIndex,
-            localTime->tm_year + 1900, localTime->tm_mon + 1, localTime->tm_mday,
-            localTime->tm_hour, localTime->tm_min, localTime->tm_sec);
-
-    s_djiLogFile = fopen(filePath, "wb+");
-    if (s_djiLogFile == nullptr) {
-        USER_LOG_ERROR("Open filepath time error.");
-        return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
-    }
-
-    if (logFileIndex >= DJI_LOG_MAX_COUNT) {
-        sprintf(systemCmd, "rm -rf %s_%04d*.log", path, currentLogFileIndex - DJI_LOG_MAX_COUNT);
-        ret = system(systemCmd);
-        if (ret != 0) {
-            printf("Remove file error, ret:%d.\r\n", ret);
-            return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
-        }
-    }
-
-    return djiReturnCode;
-
-}
-static void DjiUser_NormalExitHandler(int signalNum)
-{
-    USER_UTIL_UNUSED(signalNum);
-    exit(0);
-}
-
-static T_DjiMutexHandle s_commonMutex = {0};
-static T_DjiMutexHandle s_zoomMutex = {0};
-static T_DjiMutexHandle s_tapZoomMutex = {0};
-
-#include "dji_payload_camera.h"
-static T_DjiCameraCommonHandler s_commonHandler;
-static T_DjiCameraMediaDownloadPlaybackHandler s_psdkCameraMedia = {0};
-static T_DjiCameraSDCardState s_cameraSDCardState = {0};
-static T_DjiCameraSystemState s_cameraState ;
-static T_DjiReturnCode GetSystemState(T_DjiCameraSystemState *systemState);
-static T_DjiReturnCode SetMode(E_DjiCameraMode mode);
-static T_DjiReturnCode StartRecordVideo(void);
-static T_DjiReturnCode StopRecordVideo(void);
-static T_DjiReturnCode StartShootPhoto(void);
-static T_DjiReturnCode StopShootPhoto(void);
-static T_DjiReturnCode SetShootPhotoMode(E_DjiCameraShootPhotoMode mode);
-static T_DjiReturnCode GetShootPhotoMode(E_DjiCameraShootPhotoMode *mode);
-static T_DjiReturnCode SetPhotoBurstCount(E_DjiCameraBurstCount burstCount);
-static T_DjiReturnCode GetPhotoBurstCount(E_DjiCameraBurstCount *burstCount);
-static T_DjiReturnCode SetPhotoTimeIntervalSettings(T_DjiCameraPhotoTimeIntervalSettings settings);
-static T_DjiReturnCode GetPhotoTimeIntervalSettings(T_DjiCameraPhotoTimeIntervalSettings *settings);
-static T_DjiReturnCode GetSDCardState(T_DjiCameraSDCardState *sdCardState);
-static T_DjiReturnCode FormatSDCard(void);
-T_DjiReturnCode DjiTest_CameraGetMode(E_DjiCameraMode *mode);
-T_DjiReturnCode DjiTest_CameraEmuBaseStartService(void)
+T_DjiReturnCode SetCameraEnvironment(void)
 {
     T_DjiReturnCode returnCode;
     T_DjiOsalHandler *osalHandler = DjiPlatform_GetOsalHandler();
-    
-
     returnCode = osalHandler->MutexCreate(&s_commonMutex);
     if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
         USER_LOG_ERROR("create mutex used to lock tap zoom arguments error: 0x%08llX", returnCode);
         return returnCode;
     }
-
-    
     s_cameraSDCardState.isInserted = true;
     s_cameraSDCardState.isVerified = true;
     s_cameraSDCardState.totalSpaceInMB = SDCARD_TOTAL_SPACE_IN_MB;
@@ -342,9 +184,7 @@ T_DjiReturnCode DjiTest_CameraEmuBaseStartService(void)
     s_cameraSDCardState.availableCaptureCount = SDCARD_TOTAL_SPACE_IN_MB / SDCARD_PER_PHOTO_SPACE_IN_MB;
     s_cameraSDCardState.availableRecordingTimeInSeconds =
         SDCARD_TOTAL_SPACE_IN_MB / SDCARD_PER_SECONDS_RECORD_SPACE_IN_MB;
-    
     s_cameraState.cameraMode=DJI_CAMERA_MODE_SHOOT_PHOTO;
-
     returnCode = DjiPayloadCamera_Init();//这个初始化才会在MSDK上显示窗口
     if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
         USER_LOG_ERROR("init payload camera error:0x%08llX", returnCode);
@@ -365,24 +205,202 @@ T_DjiReturnCode DjiTest_CameraEmuBaseStartService(void)
     s_commonHandler.GetPhotoTimeIntervalSettings = GetPhotoTimeIntervalSettings;
     s_commonHandler.GetSDCardState = GetSDCardState;
     s_commonHandler.FormatSDCard = FormatSDCard;
-
-
-
-
     returnCode = DjiPayloadCamera_RegCommonHandler(&s_commonHandler);
     if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
         USER_LOG_ERROR("camera register common handler error:0x%08llX", returnCode);
     }
-
-    
-    // returnCode = DjiPayloadCamera_SetVideoStreamType(DJI_CAMERA_VIDEO_STREAM_TYPE_H264_DJI_FORMAT);
-    // if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
-    //     USER_LOG_ERROR("DJI camera set video stream error.");
-    //     return DJI_ERROR_SYSTEM_MODULE_CODE_UNKNOWN;
-    // }
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
-static T_DjiReturnCode GetSystemState(T_DjiCameraSystemState *systemState)
+
+T_DjiReturnCode Camera_Init(void)
+{
+    T_DjiOsalHandler *osalHandler = DjiPlatform_GetOsalHandler();
+    T_DjiReturnCode returnCode;
+    auto& camera =Camera::getInstance();
+    camera.init("/dev/video0", [](const uint8_t* data, size_t size)
+    {
+        const uint32_t MAX_SEND_SIZE = 60000;
+        uint32_t lengthOfDataHaveBeenSent = 0;
+        T_DjiReturnCode returnCode;
+        while (size - lengthOfDataHaveBeenSent) 
+        {
+            uint32_t lengthOfDataToBeSent = USER_UTIL_MIN(MAX_SEND_SIZE,size - lengthOfDataHaveBeenSent);
+            returnCode = DjiPayloadCamera_SendVideoStream(data + lengthOfDataHaveBeenSent,lengthOfDataToBeSent);
+            if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) 
+            {
+                USER_LOG_ERROR("Send video stream error: 0x%08llX", returnCode);
+                break;
+            }
+            lengthOfDataHaveBeenSent += lengthOfDataToBeSent;
+        }
+    });
+    const T_DjiDataChannelBandwidthProportionOfHighspeedChannel bandwidthProportionOfHighspeedChannel ={10, 60, 30};
+    T_DjiAircraftInfoBaseInfo aircraftInfoBaseInfo ;
+    UtilBuffer_Init(&s_mediaPlayCommandBufferHandler, s_mediaPlayCommandBuffer, sizeof(s_mediaPlayCommandBuffer));
+    if (DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS != osalHandler->SemaphoreCreate(0, &s_mediaPlayWorkSem)) {
+        USER_LOG_ERROR("SemaphoreCreate(\"%s\") error.", "s_mediaPlayWorkSem");
+        return DJI_ERROR_SYSTEM_MODULE_CODE_UNKNOWN;
+    }
+
+    if (osalHandler->MutexCreate(&s_mediaPlayCommandBufferMutex) != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+        USER_LOG_ERROR("mutex create error");
+        return DJI_ERROR_SYSTEM_MODULE_CODE_UNKNOWN;
+    }
+
+
+    
+    s_psdkCameraMedia.GetMediaFileDir = GetMediaFileDir;
+    s_psdkCameraMedia.GetMediaFileOriginInfo = DjiTest_CameraMediaGetFileInfo;
+    s_psdkCameraMedia.GetMediaFileOriginData = GetMediaFileOriginData;
+
+    s_psdkCameraMedia.CreateMediaFileThumbNail = CreateMediaFileThumbNail;
+    s_psdkCameraMedia.GetMediaFileThumbNailInfo = GetMediaFileThumbNailInfo;
+    s_psdkCameraMedia.GetMediaFileThumbNailData = GetMediaFileThumbNailData;
+    s_psdkCameraMedia.DestroyMediaFileThumbNail = DestroyMediaFileThumbNail;
+
+    s_psdkCameraMedia.CreateMediaFileScreenNail = CreateMediaFileScreenNail;
+    s_psdkCameraMedia.GetMediaFileScreenNailInfo = GetMediaFileScreenNailInfo;
+    s_psdkCameraMedia.GetMediaFileScreenNailData = GetMediaFileScreenNailData;
+    s_psdkCameraMedia.DestroyMediaFileScreenNail = DestroyMediaFileScreenNail;
+
+    s_psdkCameraMedia.DeleteMediaFile = DeleteMediaFile;
+
+    s_psdkCameraMedia.SetMediaPlaybackFile = SetMediaPlaybackFile;
+
+    s_psdkCameraMedia.StartMediaPlayback = StartMediaPlayback;
+    s_psdkCameraMedia.StopMediaPlayback = StopMediaPlayback;
+    s_psdkCameraMedia.PauseMediaPlayback = PauseMediaPlayback;
+    s_psdkCameraMedia.SeekMediaPlayback = SeekMediaPlayback;
+    s_psdkCameraMedia.GetMediaPlaybackStatus = GetMediaPlaybackStatus;
+
+    s_psdkCameraMedia.StartDownloadNotification = StartDownloadNotification;
+    s_psdkCameraMedia.StopDownloadNotification = StopDownloadNotification;
+    returnCode = DjiPayloadCamera_RegMediaDownloadPlaybackHandler(&s_psdkCameraMedia);
+        if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+            USER_LOG_ERROR("psdk camera media function init error.");
+            return DJI_ERROR_SYSTEM_MODULE_CODE_UNKNOWN;
+        }
+
+
+    returnCode = DjiHighSpeedDataChannel_SetBandwidthProportion(bandwidthProportionOfHighspeedChannel);
+    if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+        USER_LOG_ERROR("Set data channel bandwidth width proportion error.");
+        return DJI_ERROR_SYSTEM_MODULE_CODE_UNKNOWN;
+    }
+    returnCode = osalHandler->TaskCreate("user_camera_media_task", UserCameraMedia_SendVideoTask, 2048,
+                                             NULL, &s_userSendVideoThread);
+        if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+            USER_LOG_ERROR("user send video task create error.");
+            return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
+        }
+
+        camera.start();
+
+        return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
+}
+
+//-----private------
+T_DjiReturnCode DjiUser_PrintConsole(const uint8_t *data, uint16_t dataLen)
+{
+    printf("%s", data);
+
+    return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
+}
+
+
+void DjiUser_NormalExitHandler(int signalNum)
+{
+    USER_UTIL_UNUSED(signalNum);
+    exit(0);
+}
+T_DjiReturnCode DjiTest_CameraMediaGetFileInfo(const char *filePath, T_DjiCameraMediaFileInfo *fileInfo)
+{
+    T_DjiReturnCode returnCode;
+    T_DjiMediaFileHandle mediaFileHandle;
+
+    returnCode = DjiMediaFile_CreateHandle(filePath, &mediaFileHandle);
+    if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+        USER_LOG_ERROR("Media file create handle error stat:0x%08llX", returnCode);
+        return returnCode;
+    }
+
+    returnCode = DjiMediaFile_GetMediaFileType(mediaFileHandle, &fileInfo->type);
+    if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+        USER_LOG_ERROR("Media file get type error stat:0x%08llX", returnCode);
+        goto out;
+    }
+
+    returnCode = DjiMediaFile_GetMediaFileAttr(mediaFileHandle, &fileInfo->mediaFileAttr);
+    if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+        USER_LOG_ERROR("Media file get attr error stat:0x%08llX", returnCode);
+        goto out;
+    }
+
+    returnCode = DjiMediaFile_GetFileSizeOrg(mediaFileHandle, &fileInfo->fileSize);
+    if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+        USER_LOG_ERROR("Media file get size error stat:0x%08llX", returnCode);
+        goto out;
+    }
+
+out:
+    returnCode = DjiMediaFile_DestroyHandle(mediaFileHandle);
+    if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+        USER_LOG_ERROR("Media file destroy handle error stat:0x%08llX", returnCode);
+        return returnCode;
+    }
+
+    return returnCode;
+}
+
+void *UserCameraMedia_SendVideoTask(void *arg)
+{
+    T_DjiOsalHandler *osalHandler = DjiPlatform_GetOsalHandler();
+    T_TestPayloadCameraPlaybackCommand playbackCommand ;
+    uint16_t bufferReadSize = 0;
+    static uint32_t photoCnt = 0;
+    bool isStartIntervalPhotoAction = false;
+    s_cameraShootPhotoMode = DJI_CAMERA_SHOOT_PHOTO_MODE_SINGLE;
+    while(1) {
+  
+        if (s_cameraState.shootingState != DJI_CAMERA_SHOOTING_PHOTO_IDLE &&
+            photoCnt++ > TAKING_PHOTO_SPENT_TIME_MS_EMU / (1000 / PAYLOAD_CAMERA_EMU_TASK_FREQ)) {
+            photoCnt = 0;
+
+            //store the photo after shooting finished
+            if (s_cameraShootPhotoMode == DJI_CAMERA_SHOOT_PHOTO_MODE_SINGLE) {
+                
+                s_cameraSDCardState.remainSpaceInMB =
+                    s_cameraSDCardState.remainSpaceInMB - SDCARD_PER_PHOTO_SPACE_IN_MB;
+                s_cameraState.isStoring = false;
+                s_cameraState.shootingState = DJI_CAMERA_SHOOTING_PHOTO_IDLE;
+            } else if (s_cameraShootPhotoMode == DJI_CAMERA_SHOOT_PHOTO_MODE_BURST) {
+                s_cameraSDCardState.remainSpaceInMB =
+                    s_cameraSDCardState.remainSpaceInMB - SDCARD_PER_PHOTO_SPACE_IN_MB * s_cameraBurstCount;
+                s_cameraState.isStoring = false;
+                s_cameraState.shootingState = DJI_CAMERA_SHOOTING_PHOTO_IDLE;
+            } else if (s_cameraShootPhotoMode == DJI_CAMERA_SHOOT_PHOTO_MODE_INTERVAL) {
+                if (isStartIntervalPhotoAction == true) {
+                    s_cameraState.isStoring = false;
+                    s_cameraState.shootingState = DJI_CAMERA_SHOOTING_PHOTO_IDLE;
+                    s_cameraSDCardState.remainSpaceInMB =
+                        s_cameraSDCardState.remainSpaceInMB - SDCARD_PER_PHOTO_SPACE_IN_MB;
+                }
+            }
+        
+    }
+    }
+
+    return NULL;
+}
+
+
+
+
+
+
+
+
+T_DjiReturnCode GetSystemState(T_DjiCameraSystemState *systemState)
 {
     T_DjiReturnCode returnCode;
     T_DjiOsalHandler *osalHandler = DjiPlatform_GetOsalHandler();
@@ -403,30 +421,18 @@ static T_DjiReturnCode GetSystemState(T_DjiCameraSystemState *systemState)
 
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
-static T_DjiReturnCode SetMode(E_DjiCameraMode mode){
+T_DjiReturnCode SetMode(E_DjiCameraMode mode){
     
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
-static T_DjiReturnCode StartRecordVideo(void){
+T_DjiReturnCode StartRecordVideo(void){
     
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
-static T_DjiReturnCode StopRecordVideo(void){
-    return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
+T_DjiReturnCode StopRecordVideo(void){
+       return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
-
-#include <jpeglib.h>
-#include <algorithm>
-#include <cmath>
-#include <chrono>
-#include <iomanip>
-#include <sys/stat.h>
-#define INTERVAL_PHOTOGRAPH_ALWAYS_COUNT        (255)
-#define INTERVAL_PHOTOGRAPH_INTERVAL_INIT_VALUE (1)  
-static T_DjiCameraPhotoTimeIntervalSettings s_cameraPhotoTimeIntervalSettings = {INTERVAL_PHOTOGRAPH_ALWAYS_COUNT,
-                                                                                 INTERVAL_PHOTOGRAPH_INTERVAL_INIT_VALUE};
-static E_DjiCameraShootPhotoMode s_cameraShootPhotoMode = DJI_CAMERA_SHOOT_PHOTO_MODE_SINGLE;
-static T_DjiReturnCode StartShootPhoto(void) {
+T_DjiReturnCode StartShootPhoto(void) {
     T_DjiReturnCode returnCode;
     T_DjiOsalHandler *osalHandler = DjiPlatform_GetOsalHandler();
     s_cameraSDCardState.isVerified=false;
@@ -599,7 +605,7 @@ static T_DjiReturnCode StartShootPhoto(void) {
     T_DjiCameraMediaFileInfo mediaFileInfo ;
     if (DjiTest_CameraMediaGetFileInfo(jpgFilePath.str().c_str(), &mediaFileInfo) == DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
         // 推送文件信息 
-        std::string fullFilePath = "/home/jetson/Downloads/run_psdk/" + jpgFilePath.str();
+        std::string fullFilePath = JPG_DIR + jpgFilePath.str();
         std::cout<<fullFilePath<<std::endl;
 
         T_DjiReturnCode returnCode = DjiPayloadCamera_PushAddedMediaFileInfo(
@@ -612,36 +618,14 @@ static T_DjiReturnCode StartShootPhoto(void) {
             USER_LOG_ERROR("Push media file info failed");
         }
     }
-    
-    
-    // returnCode = osalHandler->MutexLock(s_commonMutex);
-    // if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
-    //     USER_LOG_ERROR("lock mutex error: 0x%08llX.", returnCode);
-    //     return returnCode;
-    // }
-
-    // USER_LOG_INFO("stop shoot photo");
-    // s_cameraState.shootingState = DJI_CAMERA_SHOOTING_PHOTO_IDLE;
-    // s_cameraState.isStoring = false;
-    // s_cameraState.isShootingIntervalStart = false;
-
-    // returnCode = osalHandler->MutexUnlock(s_commonMutex);
-    // if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
-    //     USER_LOG_ERROR("unlock mutex error: 0x%08llX.", returnCode);
-    //     return returnCode;
-    // }
     s_cameraSDCardState.isVerified=true;
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
-
-static T_DjiReturnCode StopShootPhoto(void){
+T_DjiReturnCode StopShootPhoto(void){
     USER_LOG_INFO("stop shoot photo");
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
-
-
-// 示例代码
-static T_DjiReturnCode SetShootPhotoMode(E_DjiCameraShootPhotoMode mode) {
+T_DjiReturnCode SetShootPhotoMode(E_DjiCameraShootPhotoMode mode) {
    T_DjiReturnCode returnCode;
     T_DjiOsalHandler *osalHandler = DjiPlatform_GetOsalHandler();
 
@@ -662,8 +646,7 @@ static T_DjiReturnCode SetShootPhotoMode(E_DjiCameraShootPhotoMode mode) {
 
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
-
-static T_DjiReturnCode GetShootPhotoMode(E_DjiCameraShootPhotoMode *mode){
+T_DjiReturnCode GetShootPhotoMode(E_DjiCameraShootPhotoMode *mode){
     T_DjiReturnCode returnCode;
     T_DjiOsalHandler *osalHandler = DjiPlatform_GetOsalHandler();
 
@@ -683,7 +666,7 @@ static T_DjiReturnCode GetShootPhotoMode(E_DjiCameraShootPhotoMode *mode){
 
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
-static T_DjiReturnCode SetPhotoBurstCount(E_DjiCameraBurstCount burstCount){
+T_DjiReturnCode SetPhotoBurstCount(E_DjiCameraBurstCount burstCount){
     T_DjiReturnCode returnCode;
     T_DjiOsalHandler *osalHandler = DjiPlatform_GetOsalHandler();
 
@@ -704,7 +687,7 @@ static T_DjiReturnCode SetPhotoBurstCount(E_DjiCameraBurstCount burstCount){
 
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
-static T_DjiReturnCode GetPhotoBurstCount(E_DjiCameraBurstCount *burstCount){
+T_DjiReturnCode GetPhotoBurstCount(E_DjiCameraBurstCount *burstCount){
     T_DjiReturnCode returnCode;
     T_DjiOsalHandler *osalHandler = DjiPlatform_GetOsalHandler();
 
@@ -724,7 +707,7 @@ static T_DjiReturnCode GetPhotoBurstCount(E_DjiCameraBurstCount *burstCount){
 
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
-static T_DjiReturnCode SetPhotoTimeIntervalSettings(T_DjiCameraPhotoTimeIntervalSettings settings){
+T_DjiReturnCode SetPhotoTimeIntervalSettings(T_DjiCameraPhotoTimeIntervalSettings settings){
     T_DjiReturnCode returnCode;
     T_DjiOsalHandler *osalHandler = DjiPlatform_GetOsalHandler();
 
@@ -748,10 +731,10 @@ static T_DjiReturnCode SetPhotoTimeIntervalSettings(T_DjiCameraPhotoTimeInterval
 
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
-static T_DjiReturnCode GetPhotoTimeIntervalSettings(T_DjiCameraPhotoTimeIntervalSettings *settings){
+T_DjiReturnCode GetPhotoTimeIntervalSettings(T_DjiCameraPhotoTimeIntervalSettings *settings){
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
-static T_DjiReturnCode GetSDCardState(T_DjiCameraSDCardState *sdCardState)
+T_DjiReturnCode GetSDCardState(T_DjiCameraSDCardState *sdCardState)
 {
     T_DjiReturnCode returnCode;
     T_DjiOsalHandler *osalHandler = DjiPlatform_GetOsalHandler();
@@ -772,7 +755,7 @@ static T_DjiReturnCode GetSDCardState(T_DjiCameraSDCardState *sdCardState)
 
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
-static T_DjiReturnCode FormatSDCard(void){
+T_DjiReturnCode FormatSDCard(void){
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
 T_DjiReturnCode DjiTest_CameraGetMode(E_DjiCameraMode *mode){
@@ -797,254 +780,8 @@ T_DjiReturnCode DjiTest_CameraGetMode(E_DjiCameraMode *mode){
     
 }
 
-typedef enum {
-    TEST_PAYLOAD_CAMERA_MEDIA_PLAY_COMMAND_STOP = 0,
-    TEST_PAYLOAD_CAMERA_MEDIA_PLAY_COMMAND_PAUSE = 1,
-    TEST_PAYLOAD_CAMERA_MEDIA_PLAY_COMMAND_START = 2,
-} E_TestPayloadCameraPlaybackCommand;
-typedef struct {
-    E_TestPayloadCameraPlaybackCommand command;
-    uint32_t timeMs;
-    char path[DJI_FILE_PATH_SIZE_MAX];
-} T_TestPayloadCameraPlaybackCommand;
-static T_UtilBuffer s_mediaPlayCommandBufferHandler = {0};
-static uint8_t s_mediaPlayCommandBuffer[sizeof(T_TestPayloadCameraPlaybackCommand) * 32] = {0};
-static T_DjiMutexHandle s_mediaPlayCommandBufferMutex = {0};
-static T_DjiSemaHandle s_mediaPlayWorkSem = NULL;
-static T_DjiTaskHandle s_userSendVideoThread;
 
-static T_DjiReturnCode GetMediaFileDir(char *dirPath);
-static T_DjiReturnCode GetMediaFileOriginData(const char *filePath, uint32_t offset, uint32_t length,
-                                              uint8_t *data);
-
-static T_DjiReturnCode CreateMediaFileThumbNail(const char *filePath);
-static T_DjiReturnCode GetMediaFileThumbNailInfo(const char *filePath, T_DjiCameraMediaFileInfo *fileInfo);
-static T_DjiReturnCode GetMediaFileThumbNailData(const char *filePath, uint32_t offset, uint32_t length,
-                                                 uint8_t *data);
-static T_DjiReturnCode DestroyMediaFileThumbNail(const char *filePath);
-
-static T_DjiReturnCode CreateMediaFileScreenNail(const char *filePath);
-static T_DjiReturnCode GetMediaFileScreenNailInfo(const char *filePath, T_DjiCameraMediaFileInfo *fileInfo);
-static T_DjiReturnCode GetMediaFileScreenNailData(const char *filePath, uint32_t offset, uint32_t length,
-                                                  uint8_t *data);
-static T_DjiReturnCode DestroyMediaFileScreenNail(const char *filePath);
-
-static T_DjiReturnCode DeleteMediaFile(char *filePath);
-static T_DjiReturnCode SetMediaPlaybackFile(const char *filePath);
-static T_DjiReturnCode StartMediaPlayback(void);
-static T_DjiReturnCode StopMediaPlayback(void);
-static T_DjiReturnCode PauseMediaPlayback(void);
-static T_DjiReturnCode SeekMediaPlayback(uint32_t playbackPosition);
-static T_DjiReturnCode GetMediaPlaybackStatus(T_DjiCameraPlaybackStatus *status);
-
-static T_DjiReturnCode StartDownloadNotification(void);
-static T_DjiReturnCode StopDownloadNotification(void);
-static void *UserCameraMedia_SendVideoTask(void *arg);
-T_DjiReturnCode media_init(void)
-{
-    T_DjiOsalHandler *osalHandler = DjiPlatform_GetOsalHandler();
-    T_DjiReturnCode returnCode;
-    
-    auto& camera =Camera::getInstance();
-    camera.init("/dev/video0", [](const uint8_t* data, size_t size) {
-    const uint32_t MAX_SEND_SIZE = 60000;
-    uint32_t lengthOfDataHaveBeenSent = 0;
-    T_DjiReturnCode returnCode;
-    // for (int i = 0; i < 20; i++) {
-    //     printf("%02X ", data[i]); // 按字节写入十六进制数据
-    //     }
-    //     printf("\n");
-    while (size - lengthOfDataHaveBeenSent) {
-        uint32_t lengthOfDataToBeSent = USER_UTIL_MIN(MAX_SEND_SIZE, 
-                                                     size - lengthOfDataHaveBeenSent);
-        
-        returnCode = DjiPayloadCamera_SendVideoStream(
-            data + lengthOfDataHaveBeenSent,
-            lengthOfDataToBeSent
-        );
-        
-        if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
-            USER_LOG_ERROR("Send video stream error: 0x%08llX", returnCode);
-            break;
-        }
-        
-        lengthOfDataHaveBeenSent += lengthOfDataToBeSent;
-    }
-});
-    auto& player = VideoPlayer::getInstance();
-    player.init("PSDK_0006.h264", [](const uint8_t* data, size_t size) {
-    // 这里调用DJI的发送函数
-        for (int i = 0; i < 20; i++) {
-        printf("%02X ", data[i]); // 按字节写入十六进制数据
-        }
-        printf("\n"); // 每 16 字节换行
-            
-        
-        DjiPayloadCamera_SendVideoStream(data, size);
-    });
-
-
-    const T_DjiDataChannelBandwidthProportionOfHighspeedChannel bandwidthProportionOfHighspeedChannel =
-        {10, 60, 30};
-    T_DjiAircraftInfoBaseInfo aircraftInfoBaseInfo ;
-    UtilBuffer_Init(&s_mediaPlayCommandBufferHandler, s_mediaPlayCommandBuffer, sizeof(s_mediaPlayCommandBuffer));
-    if (DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS != osalHandler->SemaphoreCreate(0, &s_mediaPlayWorkSem)) {
-        USER_LOG_ERROR("SemaphoreCreate(\"%s\") error.", "s_mediaPlayWorkSem");
-        return DJI_ERROR_SYSTEM_MODULE_CODE_UNKNOWN;
-    }
-
-    if (osalHandler->MutexCreate(&s_mediaPlayCommandBufferMutex) != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
-        USER_LOG_ERROR("mutex create error");
-        return DJI_ERROR_SYSTEM_MODULE_CODE_UNKNOWN;
-    }
-
-
-    
-    s_psdkCameraMedia.GetMediaFileDir = GetMediaFileDir;
-    s_psdkCameraMedia.GetMediaFileOriginInfo = DjiTest_CameraMediaGetFileInfo;
-    s_psdkCameraMedia.GetMediaFileOriginData = GetMediaFileOriginData;
-
-    s_psdkCameraMedia.CreateMediaFileThumbNail = CreateMediaFileThumbNail;
-    s_psdkCameraMedia.GetMediaFileThumbNailInfo = GetMediaFileThumbNailInfo;
-    s_psdkCameraMedia.GetMediaFileThumbNailData = GetMediaFileThumbNailData;
-    s_psdkCameraMedia.DestroyMediaFileThumbNail = DestroyMediaFileThumbNail;
-
-    s_psdkCameraMedia.CreateMediaFileScreenNail = CreateMediaFileScreenNail;
-    s_psdkCameraMedia.GetMediaFileScreenNailInfo = GetMediaFileScreenNailInfo;
-    s_psdkCameraMedia.GetMediaFileScreenNailData = GetMediaFileScreenNailData;
-    s_psdkCameraMedia.DestroyMediaFileScreenNail = DestroyMediaFileScreenNail;
-
-    s_psdkCameraMedia.DeleteMediaFile = DeleteMediaFile;
-
-    s_psdkCameraMedia.SetMediaPlaybackFile = SetMediaPlaybackFile;
-
-    s_psdkCameraMedia.StartMediaPlayback = StartMediaPlayback;
-    s_psdkCameraMedia.StopMediaPlayback = StopMediaPlayback;
-    s_psdkCameraMedia.PauseMediaPlayback = PauseMediaPlayback;
-    s_psdkCameraMedia.SeekMediaPlayback = SeekMediaPlayback;
-    s_psdkCameraMedia.GetMediaPlaybackStatus = GetMediaPlaybackStatus;
-
-    s_psdkCameraMedia.StartDownloadNotification = StartDownloadNotification;
-    s_psdkCameraMedia.StopDownloadNotification = StopDownloadNotification;
-    returnCode = DjiPayloadCamera_RegMediaDownloadPlaybackHandler(&s_psdkCameraMedia);
-        if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
-            USER_LOG_ERROR("psdk camera media function init error.");
-            return DJI_ERROR_SYSTEM_MODULE_CODE_UNKNOWN;
-        }
-
-
-    returnCode = DjiHighSpeedDataChannel_SetBandwidthProportion(bandwidthProportionOfHighspeedChannel);
-    if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
-        USER_LOG_ERROR("Set data channel bandwidth width proportion error.");
-        return DJI_ERROR_SYSTEM_MODULE_CODE_UNKNOWN;
-    }
-    returnCode = osalHandler->TaskCreate("user_camera_media_task", UserCameraMedia_SendVideoTask, 2048,
-                                             NULL, &s_userSendVideoThread);
-        if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
-            USER_LOG_ERROR("user send video task create error.");
-            return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
-        }
-
-        camera.start();
-
-        return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
-}
-#define TAKING_PHOTO_SPENT_TIME_MS_EMU          (500)
-#define PAYLOAD_CAMERA_EMU_TASK_FREQ            (100)
-
-static void *UserCameraMedia_SendVideoTask(void *arg)
-{
-    T_DjiOsalHandler *osalHandler = DjiPlatform_GetOsalHandler();
-    T_TestPayloadCameraPlaybackCommand playbackCommand ;
-    uint16_t bufferReadSize = 0;
-    static uint32_t photoCnt = 0;
-    bool isStartIntervalPhotoAction = false;
-    //auto& cameraStream = CameraStream::getInstance();
-    
-    while(1) {
-  
-        if (s_cameraState.shootingState != DJI_CAMERA_SHOOTING_PHOTO_IDLE &&
-            photoCnt++ > TAKING_PHOTO_SPENT_TIME_MS_EMU / (1000 / PAYLOAD_CAMERA_EMU_TASK_FREQ)) {
-            photoCnt = 0;
-
-            //store the photo after shooting finished
-            if (s_cameraShootPhotoMode == DJI_CAMERA_SHOOT_PHOTO_MODE_SINGLE) {
-                
-                s_cameraSDCardState.remainSpaceInMB =
-                    s_cameraSDCardState.remainSpaceInMB - SDCARD_PER_PHOTO_SPACE_IN_MB;
-                s_cameraState.isStoring = false;
-                s_cameraState.shootingState = DJI_CAMERA_SHOOTING_PHOTO_IDLE;
-            } else if (s_cameraShootPhotoMode == DJI_CAMERA_SHOOT_PHOTO_MODE_BURST) {
-                s_cameraSDCardState.remainSpaceInMB =
-                    s_cameraSDCardState.remainSpaceInMB - SDCARD_PER_PHOTO_SPACE_IN_MB * s_cameraBurstCount;
-                s_cameraState.isStoring = false;
-                s_cameraState.shootingState = DJI_CAMERA_SHOOTING_PHOTO_IDLE;
-            } else if (s_cameraShootPhotoMode == DJI_CAMERA_SHOOT_PHOTO_MODE_INTERVAL) {
-                if (isStartIntervalPhotoAction == true) {
-                    s_cameraState.isStoring = false;
-                    s_cameraState.shootingState = DJI_CAMERA_SHOOTING_PHOTO_IDLE;
-                    s_cameraSDCardState.remainSpaceInMB =
-                        s_cameraSDCardState.remainSpaceInMB - SDCARD_PER_PHOTO_SPACE_IN_MB;
-                }
-            }
-        
-    }
-    }
-
-    return NULL;
-}
-
-// 清理函数
-void media_cleanup()
-{
-    // 停止并清理CameraStream
-    auto& cameraStream = CameraStream::getInstance();
-    cameraStream.cleanup();
-
-    // 清理其他资源
-    T_DjiOsalHandler *osalHandler = DjiPlatform_GetOsalHandler();
-    
-    if (s_userSendVideoThread) {
-        osalHandler->TaskDestroy(s_userSendVideoThread);
-        s_userSendVideoThread = NULL;
-    }
-
-    if (s_mediaPlayWorkSem) {
-        osalHandler->SemaphoreDestroy(s_mediaPlayWorkSem);
-        s_mediaPlayWorkSem = NULL;
-    }
-
-    if (s_mediaPlayCommandBufferMutex) {
-        osalHandler->MutexDestroy(s_mediaPlayCommandBufferMutex);
-        s_mediaPlayCommandBufferMutex = NULL;
-    }
-}
-typedef struct {
-    uint8_t isInPlayProcess;
-    uint16_t videoIndex;
-    char filePath[DJI_FILE_PATH_SIZE_MAX];
-    uint32_t videoLengthMs;
-    uint64_t startPlayTimestampsUs;
-    uint64_t playPosMs;
-} T_DjiPlaybackInfo;
-static T_DjiMediaFileHandle s_mediaFileThumbNailHandle;
-static T_DjiMediaFileHandle s_mediaFileScreenNailHandle;
-static T_DjiPlaybackInfo s_playbackInfo = {0};
-
-static T_DjiReturnCode DjiPlayback_GetVideoLengthMs(const char *filePath, uint32_t *videoLengthMs);
-static T_DjiReturnCode DjiPlayback_StartPlayProcess(const char *filePath, uint32_t playPosMs);
-static T_DjiReturnCode DjiPlayback_StopPlayProcess(void);
-static T_DjiReturnCode DjiPlayback_StopPlayProcess(void);
-
-static T_DjiReturnCode DjiPlayback_StopPlay(T_DjiPlaybackInfo *playbackInfo);
-static T_DjiReturnCode DjiPlayback_PausePlay(T_DjiPlaybackInfo *playbackInfo);
-static T_DjiReturnCode DjiPlayback_SetPlayFile(T_DjiPlaybackInfo *playbackInfo, const char *filePath,
-                                               uint16_t index);
-static T_DjiReturnCode DjiPlayback_SeekPlay(T_DjiPlaybackInfo *playbackInfo, uint32_t seekPos);
-static T_DjiReturnCode DjiPlayback_StartPlay(T_DjiPlaybackInfo *playbackInfo);
-static T_DjiReturnCode DjiPlayback_GetPlaybackStatus(T_DjiPlaybackInfo *playbackInfo,
-                                                     T_DjiCameraPlaybackStatus *playbackStatus);
-static T_DjiReturnCode GetMediaFileDir(char *dirPath)
+T_DjiReturnCode GetMediaFileDir(char *dirPath)
 {
     T_DjiReturnCode returnCode;
     char curFileDirPath[DJI_FILE_PATH_SIZE_MAX];
@@ -1056,11 +793,112 @@ static T_DjiReturnCode GetMediaFileDir(char *dirPath)
         return returnCode;
     }
     
-    snprintf(dirPath, DJI_FILE_PATH_SIZE_MAX, "%sjpg", "/home/jetson/Downloads/run_psdk/");
+    snprintf(dirPath, DJI_FILE_PATH_SIZE_MAX, "%sjpg", JPG_DIR);
 
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
-static T_DjiReturnCode GetMediaFileOriginData(const char *filePath, uint32_t offset, uint32_t length, uint8_t *data)
+T_DjiReturnCode DjiUser_LocalWrite(const uint8_t *data, uint16_t dataLen)
+{
+    int32_t realLen;
+
+    if (s_djiLogFile == nullptr) {
+        return DJI_ERROR_SYSTEM_MODULE_CODE_UNKNOWN;
+    }
+
+    realLen = fwrite(data, 1, dataLen, s_djiLogFile);
+    fflush(s_djiLogFile);
+    if (realLen == dataLen) {
+        return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
+    } else {
+        return DJI_ERROR_SYSTEM_MODULE_CODE_UNKNOWN;
+    }
+}
+T_DjiReturnCode DjiUser_LocalWriteFsInit(const char *path)
+{
+    T_DjiReturnCode djiReturnCode = DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
+    char filePath[DJI_LOG_PATH_MAX_SIZE];
+    char systemCmd[DJI_SYSTEM_CMD_STR_MAX_SIZE];
+    char folderName[DJI_LOG_FOLDER_NAME_MAX_SIZE];
+    time_t currentTime = time(nullptr);
+    struct tm *localTime = localtime(&currentTime);
+    uint16_t logFileIndex = 0;
+    uint16_t currentLogFileIndex;
+    uint8_t ret;
+
+    if (localTime == nullptr) {
+        printf("Get local time error.\r\n");
+        return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
+    }
+
+    if (access(DJI_LOG_FOLDER_NAME, F_OK) != 0) {
+        sprintf(folderName, "mkdir %s", DJI_LOG_FOLDER_NAME);
+        ret = system(folderName);
+        if (ret != 0) {
+            printf("Create new log folder error, ret:%d.\r\n", ret);
+            return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
+        }
+    }
+
+    s_djiLogFileCnt = fopen(DJI_LOG_INDEX_FILE_NAME, "rb+");
+    if (s_djiLogFileCnt == nullptr) {
+        s_djiLogFileCnt = fopen(DJI_LOG_INDEX_FILE_NAME, "wb+");
+        if (s_djiLogFileCnt == nullptr) {
+            return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
+        }
+    } else {
+        ret = fseek(s_djiLogFileCnt, 0, SEEK_SET);
+        if (ret != 0) {
+            printf("Seek log count file error, ret: %d, errno: %d.\r\n", ret, errno);
+            return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
+        }
+
+        ret = fread((uint16_t * ) & logFileIndex, 1, sizeof(uint16_t), s_djiLogFileCnt);
+        if (ret != sizeof(uint16_t)) {
+            printf("Read log file index error.\r\n");
+        }
+    }
+
+    currentLogFileIndex = logFileIndex;
+    logFileIndex++;
+
+    ret = fseek(s_djiLogFileCnt, 0, SEEK_SET);
+    if (ret != 0) {
+        printf("Seek log file error, ret: %d, errno: %d.\r\n", ret, errno);
+        return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
+    }
+
+    ret = fwrite((uint16_t * ) & logFileIndex, 1, sizeof(uint16_t), s_djiLogFileCnt);
+    if (ret != sizeof(uint16_t)) {
+        printf("Write log file index error.\r\n");
+        fclose(s_djiLogFileCnt);
+        return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
+    }
+
+    fclose(s_djiLogFileCnt);
+
+    sprintf(filePath, "%s_%04d_%04d%02d%02d_%02d-%02d-%02d.log", path, currentLogFileIndex,
+            localTime->tm_year + 1900, localTime->tm_mon + 1, localTime->tm_mday,
+            localTime->tm_hour, localTime->tm_min, localTime->tm_sec);
+
+    s_djiLogFile = fopen(filePath, "wb+");
+    if (s_djiLogFile == nullptr) {
+        USER_LOG_ERROR("Open filepath time error.");
+        return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
+    }
+
+    if (logFileIndex >= DJI_LOG_MAX_COUNT) {
+        sprintf(systemCmd, "rm -rf %s_%04d*.log", path, currentLogFileIndex - DJI_LOG_MAX_COUNT);
+        ret = system(systemCmd);
+        if (ret != 0) {
+            printf("Remove file error, ret:%d.\r\n", ret);
+            return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
+        }
+    }
+
+    return djiReturnCode;
+
+}
+T_DjiReturnCode GetMediaFileOriginData(const char *filePath, uint32_t offset, uint32_t length, uint8_t *data)
 {
     T_DjiReturnCode returnCode;
     uint32_t realLen = 0;
@@ -1086,8 +924,7 @@ static T_DjiReturnCode GetMediaFileOriginData(const char *filePath, uint32_t off
 
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
-
-static T_DjiReturnCode CreateMediaFileThumbNail(const char *filePath)
+T_DjiReturnCode CreateMediaFileThumbNail(const char *filePath)
 {
     T_DjiReturnCode returnCode;
 
@@ -1105,8 +942,7 @@ static T_DjiReturnCode CreateMediaFileThumbNail(const char *filePath)
 
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
-
-static T_DjiReturnCode GetMediaFileThumbNailInfo(const char *filePath, T_DjiCameraMediaFileInfo *fileInfo)
+T_DjiReturnCode GetMediaFileThumbNailInfo(const char *filePath, T_DjiCameraMediaFileInfo *fileInfo)
 {
     T_DjiReturnCode returnCode;
 
@@ -1137,8 +973,7 @@ static T_DjiReturnCode GetMediaFileThumbNailInfo(const char *filePath, T_DjiCame
 
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
-
-static T_DjiReturnCode GetMediaFileThumbNailData(const char *filePath, uint32_t offset, uint32_t length, uint8_t *data)
+T_DjiReturnCode GetMediaFileThumbNailData(const char *filePath, uint32_t offset, uint32_t length, uint8_t *data)
 {
     T_DjiReturnCode returnCode;
     uint16_t realLen = 0;
@@ -1158,8 +993,7 @@ static T_DjiReturnCode GetMediaFileThumbNailData(const char *filePath, uint32_t 
 
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
-
-static T_DjiReturnCode DestroyMediaFileThumbNail(const char *filePath)
+T_DjiReturnCode DestroyMediaFileThumbNail(const char *filePath)
 {
     T_DjiReturnCode returnCode;
 
@@ -1184,8 +1018,7 @@ static T_DjiReturnCode DestroyMediaFileThumbNail(const char *filePath)
 
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
-
-static T_DjiReturnCode CreateMediaFileScreenNail(const char *filePath)
+T_DjiReturnCode CreateMediaFileScreenNail(const char *filePath)
 {
     T_DjiReturnCode returnCode;
 
@@ -1203,8 +1036,7 @@ static T_DjiReturnCode CreateMediaFileScreenNail(const char *filePath)
 
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
-
-static T_DjiReturnCode GetMediaFileScreenNailInfo(const char *filePath, T_DjiCameraMediaFileInfo *fileInfo)
+T_DjiReturnCode GetMediaFileScreenNailInfo(const char *filePath, T_DjiCameraMediaFileInfo *fileInfo)
 {
     T_DjiReturnCode returnCode;
 
@@ -1235,9 +1067,7 @@ static T_DjiReturnCode GetMediaFileScreenNailInfo(const char *filePath, T_DjiCam
 
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
-
-static T_DjiReturnCode GetMediaFileScreenNailData(const char *filePath, uint32_t offset, uint32_t length,
-                                                  uint8_t *data)
+T_DjiReturnCode GetMediaFileScreenNailData(const char *filePath, uint32_t offset, uint32_t length,uint8_t *data)
 {
     T_DjiReturnCode returnCode;
     uint16_t realLen = 0;
@@ -1257,8 +1087,7 @@ static T_DjiReturnCode GetMediaFileScreenNailData(const char *filePath, uint32_t
 
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
-
-static T_DjiReturnCode DestroyMediaFileScreenNail(const char *filePath)
+T_DjiReturnCode DestroyMediaFileScreenNail(const char *filePath)
 {
     T_DjiReturnCode returnCode;
 
@@ -1283,8 +1112,7 @@ static T_DjiReturnCode DestroyMediaFileScreenNail(const char *filePath)
 
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
-
-static T_DjiReturnCode DeleteMediaFile(char *filePath)
+T_DjiReturnCode DeleteMediaFile(char *filePath)
 {
     T_DjiReturnCode returnCode;
 
@@ -1297,8 +1125,7 @@ static T_DjiReturnCode DeleteMediaFile(char *filePath)
 
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
-
-static T_DjiReturnCode SetMediaPlaybackFile(const char *filePath)
+T_DjiReturnCode SetMediaPlaybackFile(const char *filePath)
 {
     USER_LOG_INFO("set media playback file:%s", filePath);
     T_DjiReturnCode returnCode;
@@ -1320,8 +1147,7 @@ static T_DjiReturnCode SetMediaPlaybackFile(const char *filePath)
 
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
-
-static T_DjiReturnCode StartMediaPlayback(void)
+T_DjiReturnCode StartMediaPlayback(void)
 {
     T_DjiReturnCode returnCode;
 
@@ -1334,8 +1160,7 @@ static T_DjiReturnCode StartMediaPlayback(void)
 
     return returnCode;
 }
-
-static T_DjiReturnCode StopMediaPlayback(void)
+T_DjiReturnCode StopMediaPlayback(void)
 {
     T_DjiReturnCode returnCode;
 
@@ -1348,8 +1173,7 @@ static T_DjiReturnCode StopMediaPlayback(void)
 
     return returnCode;
 }
-
-static T_DjiReturnCode PauseMediaPlayback(void)
+T_DjiReturnCode PauseMediaPlayback(void)
 {
     T_DjiReturnCode returnCode;
 
@@ -1362,8 +1186,7 @@ static T_DjiReturnCode PauseMediaPlayback(void)
 
     return returnCode;
 }
-
-static T_DjiReturnCode SeekMediaPlayback(uint32_t playbackPosition)
+T_DjiReturnCode SeekMediaPlayback(uint32_t playbackPosition)
 {
     T_DjiReturnCode returnCode;
 
@@ -1376,8 +1199,7 @@ static T_DjiReturnCode SeekMediaPlayback(uint32_t playbackPosition)
 
     return returnCode;
 }
-
-static T_DjiReturnCode GetMediaPlaybackStatus(T_DjiCameraPlaybackStatus *status)
+T_DjiReturnCode GetMediaPlaybackStatus(T_DjiCameraPlaybackStatus *status)
 {
     T_DjiReturnCode returnCode;
 
@@ -1395,8 +1217,7 @@ static T_DjiReturnCode GetMediaPlaybackStatus(T_DjiCameraPlaybackStatus *status)
 
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
-
-static T_DjiReturnCode StartDownloadNotification(void)
+T_DjiReturnCode StartDownloadNotification(void)
 {
     T_DjiReturnCode returnCode;
     T_DjiDataChannelBandwidthProportionOfHighspeedChannel bandwidthProportion = {0};
@@ -1415,8 +1236,7 @@ static T_DjiReturnCode StartDownloadNotification(void)
 
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
-
-static T_DjiReturnCode StopDownloadNotification(void)
+T_DjiReturnCode StopDownloadNotification(void)
 {
     T_DjiReturnCode returnCode;
     T_DjiDataChannelBandwidthProportionOfHighspeedChannel bandwidthProportion = {0};
@@ -1435,7 +1255,7 @@ static T_DjiReturnCode StopDownloadNotification(void)
 
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
-static T_DjiReturnCode DjiPlayback_StopPlay(T_DjiPlaybackInfo *playbackInfo)
+T_DjiReturnCode DjiPlayback_StopPlay(T_DjiPlaybackInfo *playbackInfo)
 {
     T_DjiReturnCode returnCode;
 
@@ -1449,8 +1269,7 @@ static T_DjiReturnCode DjiPlayback_StopPlay(T_DjiPlaybackInfo *playbackInfo)
 
     return returnCode;
 }
-
-static T_DjiReturnCode DjiPlayback_PausePlay(T_DjiPlaybackInfo *playbackInfo)
+T_DjiReturnCode DjiPlayback_PausePlay(T_DjiPlaybackInfo *playbackInfo)
 {
     T_DjiReturnCode returnCode = DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
     T_DjiOsalHandler *osalHandler = DjiPlatform_GetOsalHandler();
@@ -1483,8 +1302,7 @@ static T_DjiReturnCode DjiPlayback_PausePlay(T_DjiPlaybackInfo *playbackInfo)
 
     return returnCode;
 }
-
-static T_DjiReturnCode DjiPlayback_SetPlayFile(T_DjiPlaybackInfo *playbackInfo, const char *filePath, uint16_t index)
+T_DjiReturnCode DjiPlayback_SetPlayFile(T_DjiPlaybackInfo *playbackInfo, const char *filePath, uint16_t index)
 {
     T_DjiReturnCode returnCode;
 
@@ -1504,8 +1322,7 @@ static T_DjiReturnCode DjiPlayback_SetPlayFile(T_DjiPlaybackInfo *playbackInfo, 
 
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
-
-static T_DjiReturnCode DjiPlayback_SeekPlay(T_DjiPlaybackInfo *playbackInfo, uint32_t seekPos)
+T_DjiReturnCode DjiPlayback_SeekPlay(T_DjiPlaybackInfo *playbackInfo, uint32_t seekPos)
 {
     T_DjiRunTimeStamps ti;
     T_DjiReturnCode returnCode;
@@ -1529,8 +1346,7 @@ static T_DjiReturnCode DjiPlayback_SeekPlay(T_DjiPlaybackInfo *playbackInfo, uin
 
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
-
-static T_DjiReturnCode DjiPlayback_StartPlay(T_DjiPlaybackInfo *playbackInfo)
+T_DjiReturnCode DjiPlayback_StartPlay(T_DjiPlaybackInfo *playbackInfo)
 {
     T_DjiRunTimeStamps ti;
     T_DjiReturnCode returnCode;
@@ -1553,9 +1369,7 @@ static T_DjiReturnCode DjiPlayback_StartPlay(T_DjiPlaybackInfo *playbackInfo)
 
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
-
-static T_DjiReturnCode DjiPlayback_GetPlaybackStatus(T_DjiPlaybackInfo *playbackInfo,
-                                                     T_DjiCameraPlaybackStatus *playbackStatus)
+T_DjiReturnCode DjiPlayback_GetPlaybackStatus(T_DjiPlaybackInfo *playbackInfo,T_DjiCameraPlaybackStatus *playbackStatus)
 {
     T_DjiRunTimeStamps timeStamps;
 
@@ -1594,7 +1408,7 @@ static T_DjiReturnCode DjiPlayback_GetPlaybackStatus(T_DjiPlaybackInfo *playback
 
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
-static T_DjiReturnCode DjiPlayback_StopPlayProcess(void)
+T_DjiReturnCode DjiPlayback_StopPlayProcess(void)
 {
     T_DjiReturnCode returnCode = DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
     T_TestPayloadCameraPlaybackCommand playbackCommand ;
@@ -1622,7 +1436,7 @@ static T_DjiReturnCode DjiPlayback_StopPlayProcess(void)
     osalHandler->SemaphorePost(s_mediaPlayWorkSem);
     return returnCode;
 }
-static T_DjiReturnCode DjiPlayback_GetVideoLengthMs(const char *filePath, uint32_t *videoLengthMs)
+T_DjiReturnCode DjiPlayback_GetVideoLengthMs(const char *filePath, uint32_t *videoLengthMs)
 {
     FILE *fp;
     T_DjiReturnCode returnCode;
@@ -1653,8 +1467,7 @@ out:
 
     return returnCode;
 }
-
-static T_DjiReturnCode DjiPlayback_StartPlayProcess(const char *filePath, uint32_t playPosMs)
+T_DjiReturnCode DjiPlayback_StartPlayProcess(const char *filePath, uint32_t playPosMs)
 {
     T_DjiReturnCode returnCode = DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
     T_TestPayloadCameraPlaybackCommand mediaPlayCommand;
@@ -1687,43 +1500,5 @@ static T_DjiReturnCode DjiPlayback_StartPlayProcess(const char *filePath, uint32
         return DJI_ERROR_SYSTEM_MODULE_CODE_UNKNOWN;
     }
     osalHandler->SemaphorePost(s_mediaPlayWorkSem);
-    return returnCode;
-}
-T_DjiReturnCode DjiTest_CameraMediaGetFileInfo(const char *filePath, T_DjiCameraMediaFileInfo *fileInfo)
-{
-    T_DjiReturnCode returnCode;
-    T_DjiMediaFileHandle mediaFileHandle;
-
-    returnCode = DjiMediaFile_CreateHandle(filePath, &mediaFileHandle);
-    if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
-        USER_LOG_ERROR("Media file create handle error stat:0x%08llX", returnCode);
-        return returnCode;
-    }
-
-    returnCode = DjiMediaFile_GetMediaFileType(mediaFileHandle, &fileInfo->type);
-    if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
-        USER_LOG_ERROR("Media file get type error stat:0x%08llX", returnCode);
-        goto out;
-    }
-
-    returnCode = DjiMediaFile_GetMediaFileAttr(mediaFileHandle, &fileInfo->mediaFileAttr);
-    if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
-        USER_LOG_ERROR("Media file get attr error stat:0x%08llX", returnCode);
-        goto out;
-    }
-
-    returnCode = DjiMediaFile_GetFileSizeOrg(mediaFileHandle, &fileInfo->fileSize);
-    if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
-        USER_LOG_ERROR("Media file get size error stat:0x%08llX", returnCode);
-        goto out;
-    }
-
-out:
-    returnCode = DjiMediaFile_DestroyHandle(mediaFileHandle);
-    if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
-        USER_LOG_ERROR("Media file destroy handle error stat:0x%08llX", returnCode);
-        return returnCode;
-    }
-
     return returnCode;
 }

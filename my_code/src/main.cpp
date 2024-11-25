@@ -313,16 +313,17 @@
 //     USER_UTIL_UNUSED(signalNum);
 //     exit(0);
 // }
-#include "init.h"
+
+#include "psdk_init.h"
 #include <iostream>
 int main()
 {
     
-    init();
+    SetEnvironment();
     std::cout<<"finish init"<<std::endl;
-    start_service();
-    DjiTest_CameraEmuBaseStartService();
-    media_init();
+    StartApp();
+    SetCameraEnvironment();
+    Camera_Init();
     int a;
     while (1)
     {
