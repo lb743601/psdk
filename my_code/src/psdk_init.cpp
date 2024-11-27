@@ -222,6 +222,7 @@ T_DjiReturnCode Camera_Init(void)
         const uint32_t MAX_SEND_SIZE = 60000;
         uint32_t lengthOfDataHaveBeenSent = 0;
         T_DjiReturnCode returnCode;
+        
         while (size - lengthOfDataHaveBeenSent) 
         {
             uint32_t lengthOfDataToBeSent = USER_UTIL_MIN(MAX_SEND_SIZE,size - lengthOfDataHaveBeenSent);
