@@ -58,6 +58,7 @@ void daheng_camera::stream_on()
     status = GXSendCommand(hDevice, GX_COMMAND_ACQUISITION_START);}
 cv::Mat daheng_camera::getCurrentFrame() 
 { 
+    
     return image;
 }
 void daheng_camera::set_exp(double extime)

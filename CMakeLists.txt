@@ -55,7 +55,7 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(X264 REQUIRED x264)
 include_directories(${X264_INCLUDE_DIRS})
 target_link_libraries(my_psdk ${X264_LIBRARIES})
-target_link_libraries(my_psdk pthread)
+target_link_libraries(my_psdk pthread gxiapi)
 find_package(JPEG REQUIRED)
 
 

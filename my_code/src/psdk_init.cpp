@@ -217,7 +217,7 @@ T_DjiReturnCode Camera_Init(void)
     T_DjiOsalHandler *osalHandler = DjiPlatform_GetOsalHandler();
     T_DjiReturnCode returnCode;
     auto& camera =Camera::getInstance();
-    camera.init("/dev/video0", [](const uint8_t* data, size_t size)
+    camera.init("", [](const uint8_t* data, size_t size)
     {
         const uint32_t MAX_SEND_SIZE = 60000;
         uint32_t lengthOfDataHaveBeenSent = 0;
@@ -432,202 +432,163 @@ T_DjiReturnCode StartRecordVideo(void){
 T_DjiReturnCode StopRecordVideo(void){
        return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
+
 T_DjiReturnCode StartShootPhoto(void) {
     T_DjiReturnCode returnCode;
     T_DjiOsalHandler *osalHandler = DjiPlatform_GetOsalHandler();
-    if(s_cameraShootPhotoMode == DJI_CAMERA_SHOOT_PHOTO_MODE_SINGLE)
-    {
-        s_cameraSDCardState.isVerified=false;
-    auto& camera = Camera::getInstance();
-    const std::vector<uint8_t>& frame = camera.getCurrentFrame();
-    returnCode = osalHandler->MutexLock(s_commonMutex);
-    if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
-        USER_LOG_ERROR("lock mutex error: 0x%08llX.", returnCode);
-        return returnCode;
-    }
-
-    USER_LOG_INFO("start shoot photo");
-    s_cameraState.isStoring = true;
-
-    if (s_cameraShootPhotoMode == DJI_CAMERA_SHOOT_PHOTO_MODE_SINGLE) {
-        s_cameraState.shootingState = DJI_CAMERA_SHOOTING_SINGLE_PHOTO;
-    } else if (s_cameraShootPhotoMode == DJI_CAMERA_SHOOT_PHOTO_MODE_BURST) {
-        s_cameraState.shootingState = DJI_CAMERA_SHOOTING_BURST_PHOTO;
-    } else if (s_cameraShootPhotoMode == DJI_CAMERA_SHOOT_PHOTO_MODE_INTERVAL) {
-        s_cameraState.shootingState = DJI_CAMERA_SHOOTING_INTERVAL_PHOTO;
-        s_cameraState.isShootingIntervalStart = true;
-        s_cameraState.currentPhotoShootingIntervalTimeInSeconds = s_cameraPhotoTimeIntervalSettings.timeIntervalSeconds;
-    }
-
-    returnCode = osalHandler->MutexUnlock(s_commonMutex);
-    if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
-        USER_LOG_ERROR("unlock mutex error: 0x%08llX.", returnCode);
-        return returnCode;
-    }
-    // Check if frame is empty
-    if (frame.empty()) {
-        USER_LOG_ERROR("Frame is empty, cannot save to file.");
-        return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
-    }
-
-    const size_t EXPECTED_WIDTH = 640;
-    const size_t EXPECTED_HEIGHT = 512;
-    const size_t EXPECTED_SIZE = EXPECTED_WIDTH * EXPECTED_HEIGHT;
     
-    // Check size for uint16_t data (each pixel is 2 bytes)
-    if (frame.size() != EXPECTED_SIZE * 2) {
-        USER_LOG_ERROR("Frame size mismatch. Expected: %zu, Got: %zu", 
-                      EXPECTED_SIZE * 2, frame.size());
-        return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
-    }
-
-    // Define the output folder paths
-    const std::string rawFolderPath = "data";
-    const std::string jpgFolderPath = "jpg";
-
-    // Helper function to create folder if it doesn't exist
-    auto createFolderIfNotExists = [](const std::string& folderPath) -> bool {
-        struct stat info;
-        if (stat(folderPath.c_str(), &info) != 0 || !(info.st_mode & S_IFDIR)) {
-            return mkdir(folderPath.c_str(), 0755) == 0;
-        }
-        return true;
-    };
-
-    // Ensure both folders exist
-    if (!createFolderIfNotExists(rawFolderPath) || !createFolderIfNotExists(jpgFolderPath)) {
-        USER_LOG_ERROR("Failed to create necessary directories.");
-        return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
-    }
-
-    // Get the current time and format it into the file name
-    auto now = std::chrono::system_clock::now();
-    auto now_time_t = std::chrono::system_clock::to_time_t(now);
-    auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
-
-    std::ostringstream filenameBase;
-    filenameBase << std::put_time(std::localtime(&now_time_t), "%Y%m%d_%H%M%S")
-                 << "_" << std::setfill('0') << std::setw(3) << now_ms.count();
-
-    // Save RAW frame
-    std::ostringstream rawFilePath;
-    rawFilePath << rawFolderPath << "/frame_" << filenameBase.str() << ".raw";
-
-    std::ofstream rawFile(rawFilePath.str(), std::ios::binary | std::ios::out);
-    if (!rawFile.is_open()) {
-        USER_LOG_ERROR("Failed to open RAW file for writing: %s", rawFilePath.str().c_str());
-        return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
-    }
-
-    rawFile.write(reinterpret_cast<const char*>(frame.data()), frame.size());
-    rawFile.close();
-    USER_LOG_INFO("RAW frame saved to file: %s", rawFilePath.str().c_str());
-
-    // Treat data as uint16_t for processing
-    const uint16_t* frameData = reinterpret_cast<const uint16_t*>(frame.data());
-    
-    // Find min and max values
-    uint16_t minVal = *std::min_element(frameData, frameData + EXPECTED_SIZE);
-    uint16_t maxVal = *std::max_element(frameData, frameData + EXPECTED_SIZE);
-
-    if (minVal == maxVal) {
-        USER_LOG_ERROR("All pixels have the same value; cannot normalize.");
-        return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
-    }
-
-    // Normalize to [0, 255] using floating point arithmetic
-    std::vector<uint8_t> normalizedFrame(EXPECTED_SIZE);
-    for (size_t i = 0; i < EXPECTED_SIZE; ++i) {
-        float normalized = static_cast<float>(frameData[i] - minVal) * 255.0f / 
-                         static_cast<float>(maxVal - minVal);
-        normalizedFrame[i] = static_cast<uint8_t>(std::round(normalized));
-    }
-
-    // Save as JPEG
-    std::ostringstream jpgFilePath;
-    jpgFilePath << jpgFolderPath << "/frame_" << filenameBase.str() << ".jpg";
-
-    FILE* jpgFile = fopen(jpgFilePath.str().c_str(), "wb");
-    if (!jpgFile) {
-        USER_LOG_ERROR("Failed to open JPG file for writing: %s", jpgFilePath.str().c_str());
-        return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
-    }
-
-    struct jpeg_compress_struct cinfo;
-    struct jpeg_error_mgr jerr;
-
-    cinfo.err = jpeg_std_error(&jerr);
-    jpeg_create_compress(&cinfo);
-    jpeg_stdio_dest(&cinfo, jpgFile);
-
-    cinfo.image_width = EXPECTED_WIDTH;
-    cinfo.image_height = EXPECTED_HEIGHT;
-    cinfo.input_components = 1;  // Grayscale
-    cinfo.in_color_space = JCS_GRAYSCALE;
-
-    jpeg_set_defaults(&cinfo);
-    jpeg_set_quality(&cinfo, 90, TRUE);
-
-    jpeg_start_compress(&cinfo, TRUE);
-
-    // Write scanlines
-    JSAMPROW row_pointer[1];
-    while (cinfo.next_scanline < cinfo.image_height) {
-        row_pointer[0] = &normalizedFrame[cinfo.next_scanline * cinfo.image_width];
-        jpeg_write_scanlines(&cinfo, row_pointer, 1);
-    }
-
-    jpeg_finish_compress(&cinfo);
-    jpeg_destroy_compress(&cinfo);
-    fclose(jpgFile);
-
-    USER_LOG_INFO("JPEG frame saved to file: %s", jpgFilePath.str().c_str());
-    
-
-     T_DjiCameraMediaFileInfo fileInfo ;  // 这会把所有成员都初始化为0
-    
-    // 设置为JPEG类型
-    fileInfo.type = DJI_CAMERA_FILE_TYPE_JPEG;
-    
-    // 获取文件大小
-    struct stat st;
-    if (stat(jpgFilePath.str().c_str(), &st) != 0) {
-        USER_LOG_ERROR("Failed to get file size for: %s", jpgFilePath.str().c_str());
-        return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
-    }
-    fileInfo.fileSize = st.st_size;
-
-    // mediaFileAttr成员保持为0，因为它们只用于视频文件
-
-    // 打印debug信息
-    USER_LOG_INFO("Pushing media file info:");
-    USER_LOG_INFO("- Path: %s", jpgFilePath.str().c_str());
-    USER_LOG_INFO("- Type: JPEG");
-    USER_LOG_INFO("- Size: %u bytes", fileInfo.fileSize);
-    T_DjiCameraMediaFileInfo mediaFileInfo ;
-    if (DjiTest_CameraMediaGetFileInfo(jpgFilePath.str().c_str(), &mediaFileInfo) == DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
-        // 推送文件信息 
-        std::string fullFilePath = JPG_DIR + jpgFilePath.str();
-        std::cout<<fullFilePath<<std::endl;
-
-        T_DjiReturnCode returnCode = DjiPayloadCamera_PushAddedMediaFileInfo(
-            fullFilePath.c_str(),
-            mediaFileInfo 
-        );
+    if(s_cameraShootPhotoMode == DJI_CAMERA_SHOOT_PHOTO_MODE_SINGLE) {
+        s_cameraSDCardState.isVerified = false;
+        auto& camera = Camera::getInstance();
+        const std::vector<uint8_t>& frame = camera.getCurrentFrame();
         
-        
-        if(returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
-            USER_LOG_ERROR("Push media file info failed");
+        returnCode = osalHandler->MutexLock(s_commonMutex);
+        if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+            USER_LOG_ERROR("lock mutex error: 0x%08llX.", returnCode);
+            return returnCode;
         }
+
+        USER_LOG_INFO("start shoot photo");
+        s_cameraState.isStoring = true;
+
+        if (s_cameraShootPhotoMode == DJI_CAMERA_SHOOT_PHOTO_MODE_SINGLE) {
+            s_cameraState.shootingState = DJI_CAMERA_SHOOTING_SINGLE_PHOTO;
+        } else if (s_cameraShootPhotoMode == DJI_CAMERA_SHOOT_PHOTO_MODE_BURST) {
+            s_cameraState.shootingState = DJI_CAMERA_SHOOTING_BURST_PHOTO;
+        } else if (s_cameraShootPhotoMode == DJI_CAMERA_SHOOT_PHOTO_MODE_INTERVAL) {
+            s_cameraState.shootingState = DJI_CAMERA_SHOOTING_INTERVAL_PHOTO;
+            s_cameraState.isShootingIntervalStart = true;
+            s_cameraState.currentPhotoShootingIntervalTimeInSeconds = s_cameraPhotoTimeIntervalSettings.timeIntervalSeconds;
+        }
+
+        returnCode = osalHandler->MutexUnlock(s_commonMutex);
+        if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+            USER_LOG_ERROR("unlock mutex error: 0x%08llX.", returnCode);
+            return returnCode;
+        }
+
+        // Check if frame is empty
+        if (frame.empty()) {
+            USER_LOG_ERROR("Frame is empty, cannot save to file.");
+            return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
+        }
+
+        const size_t EXPECTED_WIDTH = 1280;
+        const size_t EXPECTED_HEIGHT = 1024;
+        const size_t EXPECTED_SIZE = EXPECTED_WIDTH * EXPECTED_HEIGHT;
+        
+        // Check size for uint8_t data (each pixel is 1 byte)
+        if (frame.size() != EXPECTED_SIZE) {
+            USER_LOG_ERROR("Frame size mismatch. Expected: %zu, Got: %zu", 
+                          EXPECTED_SIZE, frame.size());
+            return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
+        }
+
+        // Define the output folder paths
+        const std::string rawFolderPath = "data";
+        const std::string jpgFolderPath = "jpg";
+
+        // Helper function to create folder if it doesn't exist
+        auto createFolderIfNotExists = [](const std::string& folderPath) -> bool {
+            struct stat info;
+            if (stat(folderPath.c_str(), &info) != 0 || !(info.st_mode & S_IFDIR)) {
+                return mkdir(folderPath.c_str(), 0755) == 0;
+            }
+            return true;
+        };
+
+        // Ensure both folders exist
+        if (!createFolderIfNotExists(rawFolderPath) || !createFolderIfNotExists(jpgFolderPath)) {
+            USER_LOG_ERROR("Failed to create necessary directories.");
+            return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
+        }
+
+        // Get the current time and format it into the file name
+        auto now = std::chrono::system_clock::now();
+        auto now_time_t = std::chrono::system_clock::to_time_t(now);
+        auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
+
+        std::ostringstream filenameBase;
+        filenameBase << std::put_time(std::localtime(&now_time_t), "%Y%m%d_%H%M%S")
+                     << "_" << std::setfill('0') << std::setw(3) << now_ms.count();
+
+        // Save RAW frame
+        std::ostringstream rawFilePath;
+        rawFilePath << rawFolderPath << "/frame_" << filenameBase.str() << ".raw";
+
+        std::ofstream rawFile(rawFilePath.str(), std::ios::binary | std::ios::out);
+        if (!rawFile.is_open()) {
+            USER_LOG_ERROR("Failed to open RAW file for writing: %s", rawFilePath.str().c_str());
+            return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
+        }
+
+        rawFile.write(reinterpret_cast<const char*>(frame.data()), frame.size());
+        rawFile.close();
+        USER_LOG_INFO("RAW frame saved to file: %s", rawFilePath.str().c_str());
+
+        // Save as JPEG
+        std::ostringstream jpgFilePath;
+        jpgFilePath << jpgFolderPath << "/frame_" << filenameBase.str() << ".jpg";
+
+        FILE* jpgFile = fopen(jpgFilePath.str().c_str(), "wb");
+        if (!jpgFile) {
+            USER_LOG_ERROR("Failed to open JPG file for writing: %s", jpgFilePath.str().c_str());
+            return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
+        }
+
+        struct jpeg_compress_struct cinfo;
+        struct jpeg_error_mgr jerr;
+
+        cinfo.err = jpeg_std_error(&jerr);
+        jpeg_create_compress(&cinfo);
+        jpeg_stdio_dest(&cinfo, jpgFile);
+
+        cinfo.image_width = EXPECTED_WIDTH;
+        cinfo.image_height = EXPECTED_HEIGHT;
+        cinfo.input_components = 1;  // Grayscale
+        cinfo.in_color_space = JCS_GRAYSCALE;
+
+        jpeg_set_defaults(&cinfo);
+        jpeg_set_quality(&cinfo, 90, TRUE);
+
+        jpeg_start_compress(&cinfo, TRUE);
+
+        // Write scanlines directly from the frame data
+        JSAMPROW row_pointer[1];
+        const uint8_t* frameData = frame.data();
+        while (cinfo.next_scanline < cinfo.image_height) {
+            row_pointer[0] = const_cast<uint8_t*>(frameData + cinfo.next_scanline * cinfo.image_width);
+            jpeg_write_scanlines(&cinfo, row_pointer, 1);
+        }
+
+        jpeg_finish_compress(&cinfo);
+        jpeg_destroy_compress(&cinfo);
+        fclose(jpgFile);
+
+        USER_LOG_INFO("JPEG frame saved to file: %s", jpgFilePath.str().c_str());
+
+        T_DjiCameraMediaFileInfo mediaFileInfo;
+        if (DjiTest_CameraMediaGetFileInfo(jpgFilePath.str().c_str(), &mediaFileInfo) == DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+            std::string fullFilePath = JPG_DIR + jpgFilePath.str();
+            std::cout << fullFilePath << std::endl;
+
+            returnCode = DjiPayloadCamera_PushAddedMediaFileInfo(
+                fullFilePath.c_str(),
+                mediaFileInfo
+            );
+
+            if(returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+                USER_LOG_ERROR("Push media file info failed");
+            }
+        }
+        s_cameraSDCardState.isVerified = true;
     }
-    s_cameraSDCardState.isVerified=true;
-    }
-    else
-    {
+    else {
         USER_LOG_INFO("not single mode");
     }
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
+
 T_DjiReturnCode StopShootPhoto(void){
     USER_LOG_INFO("stop shoot photo");
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;

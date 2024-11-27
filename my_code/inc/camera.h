@@ -1,24 +1,22 @@
-// camera.h
 #pragma once
 
 #include <string>
 #include <functional>
+#include <vector>
+#include "daheng_camera.h"
 #include "dji_platform.h"
 #include "dji_typedef.h"
-#include <linux/videodev2.h>
-#include <vector>
+#include <opencv2/opencv.hpp>
+
 class Camera {
 public:
-    static constexpr uint32_t WIDTH = 640;
-    static constexpr uint32_t HEIGHT = 512;
-    static constexpr uint32_t BUFFER_COUNT = 10;  // V4L2缓冲区数量
-    
-    // YUV格式数据 + NAL头
-    static constexpr uint32_t YUV_SIZE = WIDTH * HEIGHT * 3 / 2; // YUV420格式
+    static constexpr uint32_t WIDTH = 1280;
+    static constexpr uint32_t HEIGHT = 1024;
+    static constexpr uint32_t YUV_SIZE = WIDTH * HEIGHT * 3 / 2;
     static constexpr int NAL_HEADER_SIZE = 6;
 
     using FrameCallback = std::function<void(const uint8_t*, size_t)>;
-    const std::vector<uint8_t>& getCurrentFrame() const;
+
     static Camera& getInstance() {
         static Camera instance;
         return instance;
@@ -32,40 +30,31 @@ public:
     T_DjiReturnCode start();
     T_DjiReturnCode stop();
     void cleanup();
+    
+    const std::vector<uint8_t>& getCurrentFrame() const;
+    void setExposureTime(double exposureTime);
 
 private:
-    struct BufferInfo {
-        void* start;
-        size_t length;
-    };
-    std::vector<uint8_t> m_currentFrame;
     Camera() = default;
     Camera(const Camera&) = delete;
     Camera& operator=(const Camera&) = delete;
 
-    static void* captureThreadEntry(void* arg);
-    void captureThread();
-    T_DjiReturnCode initDevice();
-    T_DjiReturnCode initMmap();
+    static void* encoderThreadEntry(void* arg);
+    void encoderThread();
     T_DjiReturnCode initX264Encoder();
 
-    std::string m_devicePath;
+    static daheng_camera m_camera;
     FrameCallback m_frameCallback;
-    int m_fd{-1};  // 设备文件描述符
+    std::vector<uint8_t> m_currentFrame;
     
-    T_DjiTaskHandle m_captureThread{nullptr};
+    T_DjiTaskHandle m_encoderThread{nullptr};
     T_DjiMutexHandle m_mutex{nullptr};
-    T_DjiMutexHandle data_mutex{nullptr};
+    T_DjiMutexHandle m_dataMutex{nullptr};
     T_DjiSemaHandle m_semaphore{nullptr};
     
     bool m_isRunning{false};
     bool m_stopFlag{false};
-    
-    // V4L2缓冲区
-    BufferInfo* m_buffers{nullptr};
-    uint32_t m_bufferCount{0};
 
-    // x264编码器相关
-    void* m_encoder{nullptr};  // x264_t*
-    void* m_picture{nullptr};  // x264_picture_t*
+    void* m_encoder{nullptr};
+    void* m_picture{nullptr};
 };

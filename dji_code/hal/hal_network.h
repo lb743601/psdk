@@ -40,7 +40,7 @@ extern "C" {
  * NIC name micro define as #define 'LINUX_NETWORK_DEV   "your NIC name"'.
  */
 
-#define LINUX_NETWORK_DEV           "eth0"
+#define LINUX_NETWORK_DEV           "eth1"
 
 /**
  * @attention
